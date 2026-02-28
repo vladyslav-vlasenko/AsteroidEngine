@@ -109,16 +109,21 @@ To provide an intuitive experience and robust object management, the engine feat
 
 ## Introduction to Asteroid Engine
 
-<p>
-  <img align="left" width="250" hspace="10" src="AsteroidEngine.gif" alternative="Asteroid Engine Demo">
-  <strong>Asteroid Engine in Motion</strong><br>
-  This demonstration showcases the seamless integration of high-performance physics and modern rendering. 
-  By utilizing the <em>Semi-implicit Euler method</em>, we achieve stable orbital mechanics that preserve 
-  the system's energy over time. The visual feedback, including the <strong>Stencil Buffer</strong> 
-  outlining and real-time trajectory plotting, provides an interactive way to explore N-body 
-  dynamics directly within the OpenGL-powered viewport.
-
-</p>
+<table border="0">
+  <tr>
+    <td width="250" valign="top">
+      <img src="AsteroidEngine.gif" width="250">
+    </td>
+    <td valign="top">
+      <strong>Asteroid Engine in Motion</strong><br>
+      This demonstration showcases the seamless integration of high-performance physics and modern rendering. 
+      By utilizing the <em>Semi-implicit Euler method</em>, we achieve stable orbital mechanics that preserve 
+      the system's energy over time. The visual feedback, including the <strong>Stencil Buffer</strong> 
+      outlining and real-time trajectory plotting, provides an interactive way to explore N-body 
+      dynamics directly within the OpenGL-powered viewport.
+    </td>
+  </tr>
+</table>
 <br clear="all">
 
 ****
