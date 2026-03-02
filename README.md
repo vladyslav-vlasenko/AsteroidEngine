@@ -29,7 +29,7 @@ High-performance simulation of celestial bodies' movement written on OpenGL 4.6 
 **Asteroid Project** - it's real-time simulation of N-body system, where objects interaction with the central object of system obeys Gravitational law:
 
 $$
-\mathbf{F}_i = -\frac{GMm_i}{r^3_i}\mathbf{r}_i
+\vec{F}_i = -\frac{GMm_i}{r^3_i}\vec{r}_i
 $$
 
 where $m_i$ - appears to be mass of $i^{th}$ body, $M$ - mass of central body, $\mathbf{r_i}$ - radius-vector from the central body to  $i^{th}$ body.
@@ -37,7 +37,7 @@ where $m_i$ - appears to be mass of $i^{th}$ body, $M$ - mass of central body, $
 Taking into account that objects don't interact with each other we can easily move to acceleration of $i^{th}$ body:
 
 $$
-\mathbf{a}_i = -\frac{k}{r^3_i} \mathbf{r}_i
+\vec{a}_i = -\frac{k}{r^3_i} \vec{r}_i
 $$
 
 where $k$ - denotes proportionality coefficient ($k=GM$).
@@ -48,8 +48,8 @@ Here we use **Semi-implicit Euler method** to compute trajectory points, because
 
 $$
 \begin{aligned}
-\mathbf{v_i}(t+\delta t) &= \mathbf{v_i}(t)+\mathbf{a_i}(t)\delta t \\
-\mathbf{r}_i(t+\delta t) &= \mathbf{r}_i(t) + \mathbf{v_i}(t)\delta t +\frac{\mathbf{a_i}(t)\delta t^2}{2}
+\vec{v_i}(t+\delta t) &= \vec{v_i}(t)+\vec{a_i}(t)\delta t \\
+\vec{r}_i(t+\delta t) &= \vec{r}_i(t) + \vec{v_i}(t)\delta t +\frac{\vec{a_i}(t)\delta t^2}{2}
 \end{aligned}
 $$
 
