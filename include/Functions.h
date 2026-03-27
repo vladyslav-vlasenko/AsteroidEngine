@@ -4,8 +4,6 @@
 #include<iostream>
 #include "Interface.h"
 #include "BodyRender.h"
-#define S SHADERS_PATH
-#define A ASSETS_PATH
 struct add_object_struct
 {
 	GLFWwindow* window;
@@ -28,4 +26,32 @@ void show_all_traj_func(Button*, void* args)
 		objects[i]->flags.draw_trajectory = 1;
 		objects[i]->flags.clicked = 1;
 	}
+}
+
+bool slider_appear_condition(Slider* slider, void* args)
+{
+	Button* pace_button = (Button*)args;
+	if (pace_button->state() == true)
+	{
+		slider->callPos = vec2sq<float>(0.2f, 0.9f);
+		std::cout << "PACE" << std::endl;
+		return true;
+	}
+	return false;
+}
+
+bool slider_hide_condition(Slider* slider, void* args)
+{
+	GLFWwindow* window = (GLFWwindow*)args;
+	if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+	{
+		return true;
+	}
+	return false;
+}
+
+void slider_callback(Button* slider, void* args)
+{
+	float* slider_value_ptr = (float*)args;
+	time_scale = (*slider_value_ptr) * 1.6f;
 }

@@ -23,6 +23,6 @@ void main()
 	}
 	else if (Type == 1)
 	{
-		gl_Position = transform*vec4(vec2_mult(VCoord.xy, scale_vec.xy), VCoord.z, 1.0f);
+		gl_Position = transform*vec4(vec2_mult(VCoord.xy, scale_vec), VCoord.z, 1.0f);
 	}
 }
