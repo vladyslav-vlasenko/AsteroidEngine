@@ -59,6 +59,7 @@ public:
 		unsigned char if_pressed : 1; //if 1 - button was in waits_to_be_pressed state but left mouse button was released (button is hovered)
 //- so buttons' funcs will start their execution
 		unsigned char if_waits_to_be_pressed : 1; //if 1 - button is hovered and left mouse button is pressed (but still not released)
+		unsigned char if_just_pressed : 1; //to detect the very first moment of button pressing;
 		unsigned char if_hovered : 1;
 		unsigned char if_static : 1;
 		unsigned char if_display : 1;
@@ -66,6 +67,7 @@ public:
 		unsigned char if_in_block : 1;
 		unsigned char if_in_slider : 1;
 		unsigned char if_in_inputfield : 1;
+		
 	};
 	void clear()
 	{
@@ -73,6 +75,7 @@ public:
 		if_checked = 0;
 		if_pressed = 0;
 		if_waits_to_be_pressed = 0;
+		if_just_pressed = 0;
 		if_hovered = 0;
 		if_static = 0;
 		if_display = 0;
@@ -341,9 +344,9 @@ void char_callback(GLFWwindow*, unsigned int);
 class InputField : public Button
 {
 private:
-	unsigned int textVAO, UBO, cursorVAO, cursorVBO, cursorEBO;
+	unsigned int textVAO, UBO, cursorVAO, cursorVBO, EBO, selectionVAO, selectionVBO;
 	Shader* textShader;
-	Shader* cursorShader;
+	Shader* cursor_and_selection_Shader;
 	float strBegin; //X-coordinate of the begining of the str
 	float strEnd; //X-coordinate of the end of the str
 	float effectiveFieldHeight;
@@ -352,6 +355,8 @@ private:
 	glm::mat4 cursorTransform;
 	float cursorWidth;
 	float cursor_intensity;
+	float virt_cursorPos; //NDC position of virtual cursor intended for text selection
+	int virt_cursorPos_in_text; //position of virtual cursor in text
 	float baseline; //Y-coordinate of a baseline for correct text allignment
 	vec2sq<float> pos_in_SC; //position in screen coordinates
 	unsigned char inputFlags;
@@ -374,6 +379,8 @@ private:
 	void updateUBO();
 	void inputOperations();
 	void manualCursorDesignation();
+	void textSelection();
+	void drawSelectionRect();
 public:
 	InputField(GLFWwindow* window, Shader& Text_Shader, Shader& Cursor_Shader, Shader& Button_Shader, std::string line_filename, float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static);
 	void drawInFBO(vec2sq<float> callPos = vec2sq<float>(0.0f, 0.0f)) override;

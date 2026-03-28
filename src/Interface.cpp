@@ -342,6 +342,12 @@ void Button::checkIfButtonClicked()
 		if ((flags.if_hovered == 1 && winData->mouse_pressed == 1) && flags.if_waits_to_be_pressed == 0)
 		{
 			flags.if_waits_to_be_pressed = 1;
+			flags.if_just_pressed = 1;
+		}
+
+		else if (flags.if_just_pressed == 1)
+		{
+			flags.if_just_pressed = 0;
 		}
 
 		else if ((winData->mouse_pressed == 0 && flags.if_hovered == 1) && flags.if_waits_to_be_pressed == 1)
@@ -358,6 +364,7 @@ void Button::checkIfButtonClicked()
 		{
 			flags.if_waits_to_be_pressed = 0;
 		}
+		
 		
 	}
 	else if (flags.if_called == 0)
@@ -377,9 +384,11 @@ void Button::CallButton(bool if_call)
 		if (if_call == true)
 		{
 			flags.if_called = 1;
+			std::cout << "TRUE" << std::endl;
 		}
 		else if (if_call == false)
 		{
+			std::cout << "FALSE" << std::endl;
 			flags.if_called = 0;
 			
 		}
@@ -402,6 +411,7 @@ void Button::execCommand()
 			if (button_callback != NULL)
 				button_callback(this, button_callback_args);
 			flags.if_exec = 1;
+			std::cout << "PRESSED&EXEC" << std::endl;
 		}
 		else if (flags.if_pressed == 0)
 			flags.if_exec = 0;
@@ -775,6 +785,7 @@ void standardCallBacksForBlocks::OnePressHide(ButtonBlock* block, void*)
 			{
 				block->flags |= BUTTONBLOCK_WAIT_TO_CLOSE;
 				block->active_button_num = i;
+				std::cout << "BUTTONBLOCK_WAIT_TO_CLOSE" << std::endl;
 				break;
 			}
 		}
@@ -795,6 +806,7 @@ void standardCallBacksForBlocks::OnePressHide(ButtonBlock* block, void*)
 		block->flags &= ~BUTTONBLOCK_CLOSE;
 		block->flags &= ~BUTTONBLOCK_CALLED;
 		block->active_button_num = -1;
+		std::cout << "BUTTONBLOCK_CLOSED" << std::endl;
 	}
 	else if ((right_mouse_button_state == GLFW_PRESS && (block->flags & BUTTONBLOCK_WAIT_TO_CLOSE) == 0) && (block->flags & BUTTONBLOCK_CALLED) != 0 && (block->flags & BUTTONBLOCK_RIGHT_M_BUT_FROM_THE_BEGIN) == 0)
 	{
@@ -1042,9 +1054,12 @@ void InputField::drawCursor()
 	
 	cursor_intensity = (sin(6.0f * glfwGetTime())>0) ? 255.0f * sin(6.0f*glfwGetTime()) : 0;
 	glBindVertexArray(cursorVAO);
-	cursorShader->use();
-	cursorShader->SetMat4("transform", cursorTransform);
-	cursorShader->SetFloat("intensity", cursor_intensity);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+	cursor_and_selection_Shader->use();
+	cursor_and_selection_Shader->SetMat4("transform", cursorTransform);
+	cursor_and_selection_Shader->SetInt("type", 0);
+	cursor_and_selection_Shader->SetFloat("intensity", cursor_intensity);
+	cursor_and_selection_Shader->SetInt("Mask", mask);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 	glBindVertexArray(0);
 }
@@ -1133,7 +1148,7 @@ void InputField::inputOperations()
 
 void InputField::manualCursorDesignation()
 {
-	if (flags.if_hovered == 1 && flags.if_pressed == 1)
+	if (flags.if_hovered == 1 && flags.if_just_pressed == 1)
 	{
 		double mouseX_SC, mouseY_SC;
 		glfwGetCursorPos(Button::win, &mouseX_SC, &mouseY_SC);
@@ -1175,8 +1190,78 @@ void InputField::manualCursorDesignation()
 	
 }
 
+void InputField::textSelection()
+{
+	
+	if (flags.if_just_pressed == 1)
+	{
+		virt_cursorPos = cursorPos;
+		virt_cursorPos_in_text = cursorPos_in_text;
+		std::cout << "SELECTION" << std::endl;
+	}
+	if (flags.if_waits_to_be_pressed == 1 && flags.if_hovered == 1)
+	{
+		double mouseX_SC, mouseY_SC;
+		glfwGetCursorPos(Button::win, &mouseX_SC, &mouseY_SC);
+		float mouseX_NDC = 2 * mouseX_SC / Button::winData->WIDTH - 1;
+		int init_virt_cursorPos_in_text = virt_cursorPos_in_text;
+		if (mouseX_NDC >= letterPos_list[printed_text.size() - 1].x + text_stride_scale_param * 2.0f * (Characters[letter_list[printed_text.size() - 1]].Advance) / Button::winData->WIDTH)
+		{
+			virt_cursorPos = letterPos_list[printed_text.size() - 1].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / Button::winData->WIDTH + text_stride_scale_param * 2.0f * (Characters[letter_list[printed_text.size() - 1]].Advance) / Button::winData->WIDTH;
+			virt_cursorPos_in_text = printed_text.size();
+		}
+		else if (mouseX_NDC >= letterPos_list[printed_text.size() - 1].x)
+		{
+			virt_cursorPos = letterPos_list[printed_text.size() - 1].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / Button::winData->WIDTH;
+			virt_cursorPos_in_text = printed_text.size() - 1;
+		}
+		else if (mouseX_NDC <= letterPos_list[0].x)
+		{
+			virt_cursorPos = letterPos_list[0].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / Button::winData->WIDTH;
+			virt_cursorPos_in_text = 0;
+		}
+		else
+		{
+			for (int i = 1; i < printed_text.size(); i++)
+			{
+
+				if (mouseX_NDC >= letterPos_list[i - 1].x && mouseX_NDC <= letterPos_list[i].x)
+				{
+					virt_cursorPos = letterPos_list[i - 1].x - 2.0f * res_text_size * Characters[letter_list[i - 1]].Bearing.x / Button::winData->WIDTH;
+					virt_cursorPos_in_text = i - 1;
+					break;
+				}
+			}
+		}
+		if (init_virt_cursorPos_in_text != virt_cursorPos_in_text)
+		{
+			float selection_rect_vertices[8] =
+			{
+				cursorPos, buttonPos.y - effectiveFieldHeight / 2,
+				cursorPos, buttonPos.y + effectiveFieldHeight / 2,
+				virt_cursorPos, buttonPos.y + effectiveFieldHeight / 2,
+				virt_cursorPos, buttonPos.y - effectiveFieldHeight / 2,
+			};
+			glBindBuffer(GL_ARRAY_BUFFER, selectionVBO);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, 8 * sizeof(float), selection_rect_vertices);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+		}
+	}
+}
+
+void InputField::drawSelectionRect()
+{
+	glBindVertexArray(selectionVAO);
+	cursor_and_selection_Shader->use();
+	cursor_and_selection_Shader->SetInt("type", 1);
+	cursor_and_selection_Shader->SetInt("Mask", mask);
+
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+	glBindVertexArray(0);
+}
+
 InputField::InputField(GLFWwindow* window, Shader& Text_Shader, Shader& Cursor_Shader, Shader& Button_Shader, std::string line_filename, float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static)
-	: Button(window, Button_Shader, line_filename, position, sizeX, sizeY, Mask, if_static, NULL, NULL, NULL, NULL, this), textShader(&Text_Shader), cursorShader(&Cursor_Shader)
+	: Button(window, Button_Shader, line_filename, position, sizeX, sizeY, Mask, if_static, NULL, NULL, NULL, NULL, this), textShader(&Text_Shader), cursor_and_selection_Shader(&Cursor_Shader)
 {
 	int winHEIGHT = Button::winData->HEIGHT;
 	inputFlags = 0;
@@ -1227,12 +1312,23 @@ InputField::InputField(GLFWwindow* window, Shader& Text_Shader, Shader& Cursor_S
 
 	glGenVertexArrays(1, &cursorVAO);
 	glGenBuffers(1, &cursorVBO);
-	glGenBuffers(1, &cursorEBO);
+	glGenBuffers(1, &EBO);
 	glBindVertexArray(cursorVAO);
 	glBindBuffer(GL_ARRAY_BUFFER, cursorVBO);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cursorEBO);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
 	glBufferData(GL_ARRAY_BUFFER, 8 * sizeof(float), cursor_vertices, GL_STATIC_DRAW);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, 6 * sizeof(unsigned int), cursor_indices, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 2, GL_FLOAT, false, 2 * sizeof(float), 0);
+	glEnableVertexAttribArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindVertexArray(0);
+
+	glGenVertexArrays(1, &selectionVAO);
+	glGenBuffers(1, &selectionVBO);
+	glBindVertexArray(selectionVAO);
+	glBindBuffer(GL_ARRAY_BUFFER, selectionVBO);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+	glBufferData(GL_ARRAY_BUFFER, 8 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
 	glVertexAttribPointer(0, 2, GL_FLOAT, false, 2 * sizeof(float), 0);
 	glEnableVertexAttribArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -1245,8 +1341,11 @@ void InputField::drawInFBO(vec2sq<float> callPos)
 	inputOperations();
 	updateUBO();
 	manualCursorDesignation();
+	textSelection();
 	renderText();
+	drawSelectionRect();
 	drawCursor();
+	
 }
 
 void key_callback(GLFWwindow* window, int key, int, int action, int mods)
