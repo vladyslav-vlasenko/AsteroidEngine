@@ -15,6 +15,7 @@
 #include<string>
 #include<map>
 #include "Shader.h"
+
 #define F FONTS_PATH
 
 #define BUTTONBLOCK_CALLED 1	
@@ -67,6 +68,7 @@ public:
 		unsigned char if_in_block : 1;
 		unsigned char if_in_slider : 1;
 		unsigned char if_in_inputfield : 1;
+		unsigned char if_was_changed : 1;
 		
 	};
 	void clear()
@@ -83,9 +85,20 @@ public:
 		if_in_block = 0;
 		if_in_slider = 0;
 		if_in_inputfield = 0;
+		if_was_changed = 0;
 	}
 };
 
+struct BUTTON_SSBO
+{
+	float vertices[20];
+	glm::mat4 transform; 
+	glm::vec2 callPos;
+	int mask;
+	int if_global;
+	GLuint64 TexHandler;
+	int if_draw;
+};
 
 template <typename T>
 struct vec2sq
@@ -93,6 +106,7 @@ struct vec2sq
 	T x, y;
 	vec2sq(T X, T Y) : x(X), y(Y) {}
 	vec2sq() {}
+	vec2sq(glm::vec2 vec);
 	friend vec2sq<T> operator+(const vec2sq<T>& a, const vec2sq<T>& b)
 	{
 		return { a.x + b.x, a.y + b.y };
@@ -114,6 +128,10 @@ struct vec2sq
 		this->x += delta.x;
 		this->y += delta.y;
 		return *this;
+	}
+	operator glm::vec2() const
+	{
+		return glm::vec2((float)this->x, (float)this->y);
 	}
 	//determination of angle using vector product
 	friend float operator^(const vec2sq<T>& vec1, const vec2sq<T>& vec2)
@@ -140,6 +158,8 @@ struct vec2sq
 	}
 };
 
+
+
 struct windowData
 {
 	int WIDTH, HEIGHT;
@@ -162,6 +182,12 @@ __declspec(align(16)) struct Character_For_SSBO
 	glm::vec2 rl_st; //right lower corner ST
 };
 
+enum class GCDenum
+{
+	GCD_NDC, //Normalized coordinates;
+	GCD_SC   //Screen coordinates;
+};
+
 void mousemove_callback(GLFWwindow* window, double xpos, double ypos);
 void mousebuttonclick_callback(GLFWwindow* window, int button, int action, int mods);
 void load_cursor_image(std::string filename, unsigned char*& data, int& width, int& height);
@@ -172,15 +198,6 @@ class Button;
 class ButtonBlock;
 class Slider;
 class InputField;
-struct allButtons_type
-{
-	Button* button;
-	ButtonBlock* block;
-	Slider* slider;
-	allButtons_type(Button* but, ButtonBlock* bl, Slider* sl) : button(but), block(bl), slider(sl) {}
-};
-extern std::vector<allButtons_type> allButtons;
-
 /*********************************************************************************/
 /*********************************************************************************/
 /*********************************************************************************/
@@ -190,40 +207,45 @@ class Button
 private:
 	
 	unsigned int VAO, VBO, EBO, texture;
-	glm::mat4 transform;
 	float border_size = 0.02f;
 	glm::vec2 border_scale_vec;
+	int index_in_array;
+	
+	static void* SSBO_map_ptr;
+	static void  createFBO(GLFWwindow* window);
+
+public:
 	static unsigned int FBO;
 	static unsigned int texMask; //texture that stores masked pixels for FBO
 	static unsigned int texColor; //texture that stores colorful pixels for FBO
 	static unsigned int renderBuffer; //render buffer that stores stencil value for FBO
-
-	
-	static void  createFBO(GLFWwindow* window);
-
-public:
-	vec2sq<float> size;
+	static unsigned int globVAO;
+	static unsigned int SSBO;
+	BUTTON_SSBO buttonData;
 	vec2sq<float> buttonPos;
+	vec2sq<float> size;
 	void (*button_callback)(Button*, void*);
 	void* button_callback_args;
 	Shader* shader;
-    int mask;
+	static Shader* global_shader;
+	static Shader* indiv_shader;
 	BUTTON_FLAGS flags;
 	static GLFWwindow* win;
 	static windowData* winData;
-	Button(GLFWwindow* window, Shader& Shader, std::string filename, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static, void (*buttonCallback)(Button* button, void* args),
-		void* args, ButtonBlock* block = NULL, Slider* slider = NULL, InputField* input_field = NULL);
+	Button(GLFWwindow* window, Shader& globalShader, Shader& indivShader, std::string filename, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static, void (*buttonCallback)(Button* button, void* args),
+		void* args, Slider* slider = NULL, InputField* input_field = NULL);
 	virtual ~Button();
-	virtual void drawInFBO(vec2sq<float> callPos);
-	void drawButtonInBlocksInFBO(vec2sq<float> callPos);
-	void drawButtonBorder(vec2sq<float> callPos);
-	void drawButtonInBlockBorder(vec2sq<float> callPos);
+	bool updateDataInSSBO();
+	void drawButtonIndiv();
+	static void drawAllButtons();
 	void checkIfButtonClicked();
 	void CallButton(bool if_call);
 	bool state(); //returns button state (if_exec)
+	void setButtonPos(vec2sq<float> Position_NDC);
+	void setButtonCallPos(vec2sq<float> Call_Position, GCDenum coordFormat);
 	virtual void execCommand();
-	static void drawAllElementsInFBO();
-	static void displayButtons(Shader& interfaceShader, unsigned int scrVAO);
+	
+	
 	static int GetMouseMask();
 };
 
@@ -247,7 +269,7 @@ public:
 	vec2sq<float> targetPos;
 	vec2sq<float> blockSize;
 	int active_button_num;
-	ButtonBlock(GLFWwindow* window, std::vector<std::string>& filenames, Shader& shader, std::vector<int>& Masks,
+	ButtonBlock(GLFWwindow* window, std::vector<std::string>& filenames, Shader& globalShader, Shader& indivShader, std::vector<int>& Masks,
 		void (*CallFunctionCallback)(ButtonBlock*, void* args), void (*HideFunctionCallback)(ButtonBlock* block, void* args),
 		void (*DisplayingFunctionCallback)(ButtonBlock*, void* args), std::vector<void (*)(Button*, void*)> ButtonsFunction, std::vector<void*>& buttons_function_args,
 		void* call_args = NULL, void* hide_args = NULL, void* display_args = NULL);
@@ -283,7 +305,6 @@ class Slider : public Button
 private:
 	unsigned int frameVAO, frameVBO, frameEBO, frameTex;
 	Shader* frameShader;
-	
 	char sliderFlags;
 	vec2sq<float> framePosition;
 	vec2sq<float> frameSize;
@@ -307,14 +328,16 @@ private:
 public:
 	float slider_value; //given in interval [0; 1]
 	vec2sq<float> callPos;
-	Slider(GLFWwindow* window, std::string sliderFrame_img, std::string sliderPoint_img, vec2sq<float> sliderPos, Shader& button_shader,
+	Slider(GLFWwindow* window, std::string sliderFrame_img, std::string sliderPoint_img, vec2sq<float> sliderPos, Shader& globalShader, Shader& indivShader,
 		Shader& frame_shader, int Mask, bool if_static, void (*SliderCallback)(Button* slider, void* args), void (*SliderAppear)(Slider* slider, void* args),
 		void (*SliderDisplay)(Slider* slider, void* args), void (*SliderHide)(Slider* slider, void* args), void* SliderCallback_args = NULL, 
 		void* SliderAppear_args = NULL, void* SliderDisplay_args = NULL, void* SliderHide_args = NULL);
 	~Slider();
-	void drawInFBO();
+	void drawSliderFrameInFBO();
+	void setCallPos(vec2sq<float> CallPos);
 	void sliderCall();
 	void execCommand() override;
+	static void drawAllSliderFrames();
 	friend void standardCallBacksForSlider::SliderAppear(Slider* slider, void* args);
 	friend void standardCallBacksForSlider::SliderHide(Slider* slider, void* args);
 	friend void standardCallBacksForSlider::SliderVerticalDisplay(Slider* slider, void* args);
@@ -381,9 +404,13 @@ private:
 	void manualCursorDesignation();
 	void textSelection();
 	void drawSelectionRect();
+	void drawTextInFBO();
 public:
-	InputField(GLFWwindow* window, Shader& Text_Shader, Shader& Cursor_Shader, Shader& Button_Shader, std::string line_filename, float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static);
-	void drawInFBO(vec2sq<float> callPos = vec2sq<float>(0.0f, 0.0f)) override;
+	InputField(GLFWwindow* window, Shader& Text_Shader, Shader& Cursor_Shader, Shader& globalShader, Shader& indivShader, std::string line_filename, float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static);
+	static void drawAllTexts();
 	friend void key_callback(GLFWwindow* window, int key, int, int action, int mods);
 	friend void char_callback(GLFWwindow* window, unsigned int codepoint);
 };
+
+void drawAllElementsInFBO();
+void displayButtons(Shader& interfaceShader, unsigned int scrVAO);

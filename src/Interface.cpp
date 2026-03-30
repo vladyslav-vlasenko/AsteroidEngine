@@ -1,5 +1,17 @@
 #include "Interface.h"
-std::vector<allButtons_type> allButtons;
+
+template<>
+vec2sq<float>::vec2sq(glm::vec2 vec)
+{
+	this->x = vec.x;
+	this->y = vec.y;
+}
+
+
+std::vector<Button*> Buttons;
+std::vector<BUTTON_SSBO> Buttons_SSBO_storage;
+std::vector<Slider*> Sliders;
+std::vector<InputField*> InputFields;
 std::map<unsigned char, Character> Characters;
 unsigned int CharacterAtlasTex = 0;
 vec2sq<unsigned int> CharacterAtlasSize(0, 0);
@@ -93,6 +105,12 @@ unsigned int Button::texColor = 0;
 unsigned int Button::renderBuffer = 0;
 GLFWwindow* Button::win = nullptr;
 windowData* Button::winData = nullptr;
+unsigned int Button::globVAO = 0;
+unsigned int Button::SSBO = 0;
+void* Button::SSBO_map_ptr = nullptr;
+Shader* Button::global_shader = nullptr;
+Shader* Button::indiv_shader = nullptr;
+
 
 void Button::createFBO(GLFWwindow* window)
 {
@@ -137,11 +155,30 @@ void Button::createFBO(GLFWwindow* window)
 		}
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
+	if (SSBO == 0)
+	{
+		glGenVertexArrays(1, &globVAO);
+		glGenBuffers(1, &SSBO);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, SSBO);
+		glBufferStorage(GL_SHADER_STORAGE_BUFFER, 50 * sizeof(BUTTON_SSBO), nullptr, GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT | GL_MAP_WRITE_BIT);
+		SSBO_map_ptr = glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, 50*sizeof(BUTTON_SSBO), GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT|GL_MAP_WRITE_BIT);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	}
 }
 
-Button::Button(GLFWwindow* window, Shader& Shader, std::string filename, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static, void (*buttonCallback)(Button* button, void* args),
-	void* args, ButtonBlock* block, Slider* slider, InputField* input_field) : shader(&Shader), mask(Mask), button_callback(buttonCallback), button_callback_args(args)
+Button::Button(GLFWwindow* window, Shader& globalShader, Shader& indivShader, std::string filename, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static, void (*buttonCallback)(Button* button, void* args),
+	void* args, Slider* slider, InputField* input_field) : button_callback(buttonCallback), button_callback_args(args)
 {
+
+	if (global_shader == nullptr && indiv_shader == nullptr)
+	{
+
+		
+		global_shader = &globalShader;
+		indiv_shader = &indivShader;
+		
+	}
 	flags.clear();
 	createFBO(window);
 	unsigned char* img_data;
@@ -150,12 +187,18 @@ Button::Button(GLFWwindow* window, Shader& Shader, std::string filename, vec2sq<
 	load_image(filename, img_data, width, height, format);
 	generateTexture(texture, img_data, width, height, format);
 	stbi_image_free(img_data);
+	buttonData.TexHandler = glGetTextureHandleARB(texture);
+	glMakeTextureHandleResidentARB(buttonData.TexHandler);
+
 	if (if_static)
 	{
 		flags.if_static = true;
 		flags.if_display = true;
 		flags.if_called = true;
 		buttonPos = position;
+		buttonData.callPos = vec2sq<float>(-2.0f, 0.0f);
+		buttonData.transform = glm::translate(glm::mat4(1.0f), glm::vec3(glm::vec2(buttonPos), 0.0f));
+		buttonData.if_draw = 1;
 	}
 	float dimX, dimY;
 	if (sizeX == 0 && sizeY == 0)
@@ -180,6 +223,11 @@ Button::Button(GLFWwindow* window, Shader& Shader, std::string filename, vec2sq<
 	{
 		0, 1, 2,    0, 2, 3
 	};
+	buttonData.mask = Mask;
+	buttonData.if_global = 1;
+	buttonData.if_draw = 1;
+	memcpy(buttonData.vertices, vert_coord, 20 * sizeof(float));
+
 	border_scale_vec = glm::vec2(1.0f + border_size / size.x, 1.0f + border_size / size.y);
 	glGenVertexArrays(1, &VAO);
 	glGenBuffers(1, &VBO);
@@ -195,135 +243,129 @@ Button::Button(GLFWwindow* window, Shader& Shader, std::string filename, vec2sq<
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, 6 * sizeof(unsigned int), vert_ind, GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
-	allButtons.push_back(allButtons_type(this, block, slider));
+
+	index_in_array = Buttons.size();
+	Buttons.push_back(this);
+	Buttons_SSBO_storage.push_back(buttonData);
+	if (SSBO_map_ptr != nullptr)
+	{
+		memcpy(SSBO_map_ptr, Buttons_SSBO_storage.data(), Buttons_SSBO_storage.size() * sizeof(BUTTON_SSBO));
+		
+	}
+	
+	
 }
 
 Button::~Button()
 {
-	for (int i = 0; i < allButtons.size(); i++)
-	{
-		if (allButtons[i].button == this)
-		{
-			allButtons.erase(allButtons.begin() + i);
-			break;
-		}
-	}
+	
+	Buttons.erase(Buttons.begin() + index_in_array);
+	for (int i = index_in_array; i < Buttons.size(); i++)
+		Buttons[i]->index_in_array = i;
 	glDeleteVertexArrays(1, &VAO);
 	glDeleteBuffers(1, &VBO);
 	glDeleteBuffers(1, &EBO);
 	glDeleteTextures(1, &texture);
-	if (allButtons.size() == 0)
+	if (Buttons.size() == 0)
 	{
 		glDeleteTextures(1, &texColor);
 		glDeleteTextures(1, &texMask);
 		glDeleteRenderbuffers(1, &renderBuffer);
 		glDeleteFramebuffers(1, &FBO);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
+		glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+		glDeleteBuffers(1, &SSBO);
 	}
+	
 }
 
-void Button::drawInFBO(vec2sq<float> callPos = vec2sq<float>(0.0f, 0.0f))
+bool Button::updateDataInSSBO()
 {
-	transform = glm::translate(glm::mat4(1.0f), glm::vec3(buttonPos.x, buttonPos.y, 0.0f));
+	
+	checkIfButtonClicked();
+	execCommand();
+	bool if_needs_to_edit = flags.if_was_changed;
+	if (flags.if_hovered == 1 && buttonData.if_global != 0)
+	{
+		buttonData.if_global = 0;
+		if_needs_to_edit = true;
+	}
+	if (flags.if_hovered == 0 && buttonData.if_global != 1)
+	{
+		buttonData.if_global = 1;
+		if_needs_to_edit = true;
+	}
+	if ((flags.if_display == 1 && buttonData.if_draw == 0) || (flags.if_display == 0 && buttonData.if_draw == 1))
+	{
+		buttonData.if_draw = flags.if_display;
+		if_needs_to_edit = true;
+	}
+	flags.if_was_changed = 0;
+	if (if_needs_to_edit)
+		Buttons_SSBO_storage[index_in_array] = buttonData;
+	return if_needs_to_edit;
+}
+void Button::drawButtonIndiv()
+{
+	glStencilFunc(GL_ALWAYS, 1, 0xFF);
+	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+	glStencilMask(0xFF);
 	glBindVertexArray(VAO);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, texture);
-
-	if (flags.if_hovered == 1)
-	{
-		glStencilFunc(GL_ALWAYS, 1, 0xFF);
-		glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-		glStencilMask(0xFF);
-	}
-	shader->use();
-	shader->SetInt("type", 0);
-	shader->SetMat4("transform", transform);
-	shader->SetVec2("scale_vec", border_scale_vec);
-	shader->SetInt("Tex", 0);
-	shader->SetInt("Mask", mask);
-	if (flags.if_in_slider == 1)
-	{
-		float callPos_y = (Button::winData->HEIGHT * 1.0f / 2) * (1 + callPos.y);
-		shader->SetInt("callPos_y", callPos_y);
-	}
+	indiv_shader->use();
+	indiv_shader->SetMat4("transform", buttonData.transform);
+	indiv_shader->SetInt("type", 0);
+	indiv_shader->SetInt("Tex", 0);
+	indiv_shader->SetVec2("callPos", glm::vec2(buttonData.callPos));
+	indiv_shader->SetInt("Mask", buttonData.mask);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-	glBindTexture(GL_TEXTURE_2D, 0);
-	glBindVertexArray(0);
+	glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
 	glStencilMask(0x00);
+	indiv_shader->use();
+	indiv_shader->SetMat4("transform", buttonData.transform);
+	indiv_shader->SetInt("type", 1);
+	indiv_shader->SetVec2("scale_vec", border_scale_vec);
+	indiv_shader->SetInt("Tex", 0);
+	indiv_shader->SetVec2("callPos", glm::vec2(buttonData.callPos));
+	indiv_shader->SetInt("Mask", buttonData.mask);
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+	glStencilFunc(GL_ALWAYS, 1, 0xFF);
+	glStencilMask(0xFF);
 }
 
-void Button::drawButtonInBlocksInFBO(vec2sq<float> callPos)
+void Button::drawAllButtons()
 {
-	transform = glm::translate(glm::mat4(1.0f), glm::vec3(buttonPos.x, buttonPos.y, 0.0f));
-	glBindVertexArray(VAO);
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, texture);
-	if (flags.if_hovered == 1)
+	bool if_needs_to_be_updated = false;
+	
+	for (int i = 0; i < Buttons.size(); i++)
 	{
-		glStencilFunc(GL_ALWAYS, 1, 0xFF);
-		glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-		glStencilMask(0xFF);
-	}
-	shader->use();
-	shader->SetInt("Type", 0);
-	shader->SetInt("callPosY", (int)(winData->HEIGHT / 2 + callPos.y * winData->HEIGHT / 2));
-	shader->SetVec2("scale_vec", border_scale_vec);
-	shader->SetMat4("transform", transform);
-	shader->SetInt("Tex", 0);
-	shader->SetInt("Mask", mask);
-	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-
-	glBindTexture(GL_TEXTURE_2D, 0);
-	glBindVertexArray(0);
-	glStencilMask(0x00);
-}
-
-void Button::drawButtonBorder(vec2sq<float> callPos = vec2sq<float>(0.0f, 0.0f))
-{
-
-	if (flags.if_hovered == 1)
-	{
-		glBindVertexArray(VAO);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, texture);
-		glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
-		shader->use();
-		shader->SetInt("type", 1);
-		shader->SetMat4("transform", transform);
-		shader->SetVec2("scale_vec", border_scale_vec);
-		shader->SetInt("Tex", 0);
-		shader->SetInt("Mask", 1);
-		if (flags.if_in_slider == 1)
+		if (Buttons[i]->updateDataInSSBO())
 		{
-			float callPos_y = (Button::winData->HEIGHT * 1.0f / 2) * (1 + callPos.y);
-			shader->SetInt("callPos_y", callPos_y);
+			if_needs_to_be_updated = true;
 		}
-		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-		glBindTexture(GL_TEXTURE_2D, 0);
-		glBindVertexArray(0);
+		
 	}
-
-}
-
-void Button::drawButtonInBlockBorder(vec2sq<float> callPos)
-{
-
-	if (flags.if_hovered == 1)
+	
+	if (if_needs_to_be_updated)
 	{
-		glBindVertexArray(VAO);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, texture);
-		glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
-		shader->use();
-		shader->SetInt("Type", 1);
-		shader->SetInt("callPosY", (int)(winData->HEIGHT / 2 + callPos.y * winData->HEIGHT / 2));
-		shader->SetVec2("scale_vec", border_scale_vec);
-		shader->SetMat4("transform", transform);
-		shader->SetInt("Tex", 0);
-		shader->SetInt("Mask", 1);
-		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-		glBindTexture(GL_TEXTURE_2D, 0);
-		glBindVertexArray(0);
+		memcpy(SSBO_map_ptr, Buttons_SSBO_storage.data(), Buttons_SSBO_storage.size() * sizeof(BUTTON_SSBO));
+		glMemoryBarrier(GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT);
+
 	}
+	glBindVertexArray(globVAO);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
+	global_shader->use();
+	glDrawArraysInstanced(GL_TRIANGLES, 0, 6, Buttons.size());
+	
+	for (int i = 0; i < Buttons.size(); i++)
+	{
+		if (Buttons[i]->buttonData.if_global == 0)
+		{
+			Buttons[i]->drawButtonIndiv();
+		}
+	}
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 }
 
@@ -403,6 +445,35 @@ bool Button::state()
 		return false;
 }
 
+void Button::setButtonPos(vec2sq<float> Position_NDC)
+{
+	buttonPos = Position_NDC;
+	buttonData.transform = glm::translate(glm::mat4(1.0f), glm::vec3(glm::vec2(buttonPos), 0.0f));
+	flags.if_was_changed = 1;
+}
+
+void Button::setButtonCallPos(vec2sq<float> Call_Position, GCDenum coordFormat)
+{
+	switch (coordFormat)
+	{
+		case GCDenum::GCD_NDC:
+		{
+			buttonData.callPos.x = winData->WIDTH * (Call_Position.x + 1) / 2;
+			buttonData.callPos.y = winData->HEIGHT * (1 + Call_Position.y) / 2;
+			flags.if_was_changed = 1;
+			break;
+		}
+		case GCDenum::GCD_SC:
+		{
+			buttonData.callPos = Call_Position;
+			flags.if_was_changed = 1;
+			break;
+		}
+
+	}
+	
+}
+
 void Button::execCommand()
 {
 	
@@ -418,21 +489,23 @@ void Button::execCommand()
 
 }
 
-void Button::displayButtons(Shader& interfaceShader, unsigned int scrVAO)
+void displayButtons(Shader& interfaceShader, unsigned int scrVAO)
 {
-	Button::drawAllElementsInFBO();
+	
+	drawAllElementsInFBO();
 	glBindVertexArray(scrVAO);
 	interfaceShader.use();
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, texColor);
+	glBindTexture(GL_TEXTURE_2D, Button::texColor);
 	interfaceShader.SetInt("texColor", 0);
 	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, texMask);
+	glBindTexture(GL_TEXTURE_2D, Button::texMask);
 	interfaceShader.SetInt("texMask", 1);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glBindVertexArray(0);
+	
 }
 
 int Button::GetMouseMask()
@@ -448,10 +521,9 @@ int Button::GetMouseMask()
 	}
 	return -1;
 }
-
-void Button::drawAllElementsInFBO()
+void drawAllElementsInFBO()
 {
-	glBindFramebuffer(GL_FRAMEBUFFER, FBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, Button::FBO);
 	glEnable(GL_STENCIL_TEST);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -463,47 +535,25 @@ void Button::drawAllElementsInFBO()
 	glClearBufferfv(GL_COLOR, 0, colorClear);
 	int maskClear = 0;
 	glClearBufferiv(GL_COLOR, 1, &maskClear);
-	for (int i = 0; i < allButtons.size(); i++)
-	{
-
-		allButtons[i].button->checkIfButtonClicked();
-		allButtons[i].button->execCommand();
-
-		if (allButtons[i].button->flags.if_display == 1 && allButtons[i].button->flags.if_in_block == 1)
-			allButtons[i].button->drawButtonInBlocksInFBO(allButtons[i].block->callPos);
-		else if (allButtons[i].button->flags.if_display == 1 && allButtons[i].button->flags.if_in_slider == 1)
-		{
-			allButtons[i].slider->drawInFBO();
-		}
-		else if (allButtons[i].button->flags.if_display == 1 && allButtons[i].button->flags.if_in_inputfield == 1)
-		{
-			allButtons[i].button->drawInFBO();
-		}
-		else if (allButtons[i].button->flags.if_display == 1)
-			allButtons[i].button->drawInFBO();
-	}
-	for (int i = 0; i < allButtons.size(); i++)
-	{
-		if ((allButtons[i].button->flags.if_display == 1 && allButtons[i].button->flags.if_called == 1) && allButtons[i].button->flags.if_in_block == 0)
-			allButtons[i].button->drawButtonBorder();
-		else if ((allButtons[i].button->flags.if_display == 1 && allButtons[i].button->flags.if_called == 1) && allButtons[i].button->flags.if_in_block == 1)
-			allButtons[i].button->drawButtonInBlockBorder(allButtons[i].block->callPos);
-	}
-	int mask = GetMouseMask();
+	
+	Slider::drawAllSliderFrames();
+	Button::drawAllButtons();
+	InputField::drawAllTexts();
+	int mask = Button::GetMouseMask();
 	if (mask != -1)
 	{
-		for (int i = 0; i < allButtons.size(); i++)
+		for (int i = 0; i < Buttons.size(); i++)
 		{
-			if (allButtons[i].button->flags.if_called == 1)
+			if (Buttons[i]->flags.if_called == 1)
 			{
-				if (mask == allButtons[i].button->mask && allButtons[i].button->flags.if_hovered == 0)
+				if (mask == Buttons[i]->buttonData.mask && Buttons[i]->flags.if_hovered == 0)
 				{
-					allButtons[i].button->flags.if_hovered = 1;
+					Buttons[i]->flags.if_hovered = 1;
 					std::cout << mask << std::endl;
 				}
-				else if (mask != allButtons[i].button->mask && allButtons[i].button->flags.if_hovered == 1)
+				else if (mask != Buttons[i]->buttonData.mask && Buttons[i]->flags.if_hovered == 1)
 				{
-					allButtons[i].button->flags.if_hovered = 0;
+					Buttons[i]->flags.if_hovered = 0;
 				}
 			}
 			
@@ -522,7 +572,7 @@ void Button::drawAllElementsInFBO()
 /***********************************************************************/
 
 
-ButtonBlock::ButtonBlock(GLFWwindow* window, std::vector<std::string>& filenames, Shader& shader, std::vector<int>& Masks,
+ButtonBlock::ButtonBlock(GLFWwindow* window, std::vector<std::string>& filenames, Shader& globalShader, Shader& indivShader, std::vector<int>& Masks,
 	void (*CallFunctionCallback)(ButtonBlock*, void* args), void (*HideFunctionCallback)(ButtonBlock* block, void* args),
 	void (*DisplayingFunctionCallback)(ButtonBlock*, void* args), std::vector<void (*)(Button*, void*)> ButtonsFunction, std::vector<void*>& buttons_function_args,
 	void* call_args, void* hide_args, void* display_args)
@@ -537,7 +587,7 @@ ButtonBlock::ButtonBlock(GLFWwindow* window, std::vector<std::string>& filenames
 	flags = 0;
 	for (int i = 0; i < filenames.size(); i++)
 	{
-		Button* but = new Button(window, shader, filenames[i], vec2sq<float>(0.0f, 0.0f), 0, 0, Masks[i], false, ButtonsFunction[i], buttons_function_args[i], this);
+		Button* but = new Button(window, globalShader, indivShader, filenames[i], vec2sq<float>(0.0f, 0.0f), 0, 0, Masks[i], false, ButtonsFunction[i], buttons_function_args[i]);
 		buttons.push_back(but);
 		but->flags.if_in_block = true;
 	}
@@ -569,9 +619,11 @@ void ButtonBlock::blockCall()
 void Slider::slider_func()
 {
 	
-	buttonPos.y = framePosition.y;
+	framePosition.y = buttonPos.y;
 	refVector = buttonPos - framePosition;
+	
 	frameTransform = glm::translate(glm::mat4(1.0f), glm::vec3(framePosition.x, framePosition.y, 0.0f));
+	
 	if (flags.if_waits_to_be_pressed == 1)
 	{
 		double mouseX, mouseY;
@@ -585,19 +637,19 @@ void Slider::slider_func()
 
 void Slider::check_slider_pos(float mouseX_norm)
 {
-	if (mouseX_norm > (framePosition + 0.5 * (frameSize - size)).x)
-		buttonPos.x = (framePosition + 0.5 * (frameSize - size)).x;
+	if (mouseX_norm > (framePosition + 0.5 * (frameSize - size)).x && winData->mouse_pos_change != vec2sq<double>(0.0, 0.0))
+		setButtonPos(vec2sq<float>((framePosition + 0.5 * (frameSize - size)).x, buttonPos.y));
 	else if (mouseX_norm < (framePosition + (-0.5) * (frameSize - size)).x)
-		buttonPos.x = (framePosition + (-0.5) * (frameSize - size)).x;
+		setButtonPos(vec2sq<float>((framePosition - 0.5 * (frameSize - size)).x, buttonPos.y));
 	else
-		buttonPos.x = mouseX_norm;
+		setButtonPos(vec2sq<float>(mouseX_norm, buttonPos.y));
 }
 
-Slider::Slider(GLFWwindow* window, std::string sliderFrame_img, std::string sliderPoint_img, vec2sq<float> sliderPos, Shader& button_shader, 
+Slider::Slider(GLFWwindow* window, std::string sliderFrame_img, std::string sliderPoint_img, vec2sq<float> sliderPos, Shader& globalShader, Shader& indivShader, 
 	Shader& frame_shader, int Mask, bool if_static, void (*SliderCallback)(Button* slider, void* args), void (*SliderAppear)(Slider* slider, void* args), 
 	void (*SliderDisplay)(Slider* slider, void* args), void (*SliderHide)(Slider* slider, void* args), void* SliderCallback_args, void* SliderAppear_args, 
 	void* SliderDisplay_args, void* SliderHide_args) :
-	Button(window, button_shader, sliderPoint_img, vec2sq<float>(0.0f, 0.0f), 0.0f, 0.0f, Mask, if_static, SliderCallback, NULL, NULL, this),
+	Button(window, globalShader, indivShader, sliderPoint_img, vec2sq<float>(0.0f, 0.0f), 0.0f, 0.0f, Mask, if_static, SliderCallback, NULL, this),
 	frameShader(&frame_shader), appear_func(SliderAppear), display_func(SliderDisplay), hide_func(SliderHide), 
 	appear_args(SliderAppear_args), display_args(SliderDisplay_args), hide_args(SliderHide_args)
 {
@@ -617,9 +669,7 @@ Slider::Slider(GLFWwindow* window, std::string sliderFrame_img, std::string slid
 	if (if_static)
 	{
 		framePosition = sliderPos;
-		buttonPos = framePosition;
 	}
-	
 	float vertices[] =
 	{
 		-sizeX_norm / 2, -sizeY_norm / 2, 0.0f,      0.0f, 0.0f,
@@ -648,8 +698,9 @@ Slider::Slider(GLFWwindow* window, std::string sliderFrame_img, std::string slid
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
 	
-	refVector = buttonPos - framePosition;
-	std::cout << frameImgWidth << std::endl;
+	Sliders.push_back(this);
+	refVector = vec2sq<float>(0.5f* frameSize.x, 0.0f);
+	
 }
 Slider::~Slider()
 {
@@ -659,9 +710,15 @@ Slider::~Slider()
 	glDeleteTextures(1, &frameTex);
 
 }
-void Slider::drawInFBO()
+
+void Slider::setCallPos(vec2sq<float> CallPos)
 {
-	slider_func();
+	callPos = CallPos;
+	setButtonCallPos(callPos, GCDenum::GCD_NDC);
+}
+	
+void Slider::drawSliderFrameInFBO()
+{
 	glStencilFunc(GL_ALWAYS, 2, 0xFF);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 	glStencilMask(0xFF);
@@ -688,14 +745,35 @@ void Slider::drawInFBO()
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 	glStencilFunc(GL_ALWAYS, 1, 0xFF);
 	glStencilMask(0xFF);
-	Button::drawInFBO(callPos);
+	
+}
+
+void Slider::drawAllSliderFrames()
+{
+	
+	for (int i = 0; i < Sliders.size(); i++)
+	{
+		if (Sliders[i]->flags.if_display == 1)
+		{
+			Sliders[i]->drawSliderFrameInFBO();
+		}
+		
+		
+	}
 }
 
 void Slider::sliderCall()
 {
-	appear_func(this, appear_args);
-	display_func(this, display_args);
-	hide_func(this, hide_args);
+	
+	slider_func();
+	
+	if (appear_func != NULL && display_func != NULL && hide_func != NULL)
+	{
+		appear_func(this, appear_args);
+		display_func(this, display_args);
+		hide_func(this, hide_args);
+	}
+	
 }
 
 void Slider::execCommand()
@@ -753,7 +831,11 @@ void standardCallBacksForBlocks::RightMouseButtonCall(ButtonBlock* block, void*)
 		for (int i = 0; i < block->buttons.size(); i++)
 		{
 			block->buttons[i]->CallButton(true);
+			double callPosX_SC = posX;
+			double callPosY_SC = Button::winData->HEIGHT - posY;
+			block->buttons[i]->setButtonCallPos(vec2sq<float>(callPosX_SC, callPosY_SC), GCDenum::GCD_SC);
 		}
+		
 	}
 	else if (right_mouse_button_state == GLFW_PRESS && (block->flags & BUTTONBLOCK_CALLED) != 0)
 	{
@@ -836,8 +918,7 @@ void standardCallBacksForBlocks::VerticalDisplay(ButtonBlock * block, void* args
 		for (int i = 0; i < block->buttons.size(); i++)
 		{
 			block->buttons[i]->flags.if_display = true;
-			block->buttons[i]->buttonPos = block->callPos + vec2sq<float>(block->buttons[i]->size.x / 2, block->buttons[i]->size.y / 2);
-
+			block->buttons[i]->setButtonPos(block->callPos + vec2sq<float>(block->buttons[i]->size.x / 2, block->buttons[i]->size.y / 2));
 		}
 	}
 	if ((block->flags & BUTTONBLOCK_CALLED) != 0)
@@ -845,7 +926,10 @@ void standardCallBacksForBlocks::VerticalDisplay(ButtonBlock * block, void* args
 
 		for (int i = 0; i < block->buttons.size(); i++)
 		{
-			if (block->buttons[i]->buttonPos.y > block->callPos.y + casted_args->targetButtonPoses[i].y) block->buttons[i]->buttonPos.y -= 0.002f;
+			if (block->buttons[i]->buttonPos.y > block->callPos.y + casted_args->targetButtonPoses[i].y)
+			{
+				block->buttons[i]->setButtonPos(block->buttons[i]->buttonPos - vec2sq<float>(0.0f, 0.004f));
+			}
 		}
 	}
 	else if ((block->flags & BUTTONBLOCK_CALLED) == 0)
@@ -862,7 +946,10 @@ void standardCallBacksForBlocks::VerticalDisplay(ButtonBlock * block, void* args
 			for (int i = 0; i < block->buttons.size(); i++)
 			{
 				if (block->buttons[i]->buttonPos.y > block->callPos.y + block->buttons[i]->size.y / 2) block->buttons[i]->flags.if_display = false;
-				else if (block->buttons[i]->buttonPos.y <= block->callPos.y + block->buttons[i]->size.y / 2) block->buttons[i]->buttonPos.y += 0.002f;
+				else if (block->buttons[i]->buttonPos.y <= block->callPos.y + block->buttons[i]->size.y / 2)
+				{
+					block->buttons[i]->setButtonPos(block->buttons[i]->buttonPos + vec2sq<float>(0.0f, 0.004f));
+				}
 			}
 		}
 
@@ -887,6 +974,7 @@ void standardCallBacksForSlider::SliderAppear(Slider* slider, void* args)
 		slider->sliderFlags |= SLIDER_CALLED;
 		slider->sliderFlags |= SLIDER_CALLED_FIRST;
 		slider->flags.if_display = 1;
+		
 	}
 	else if ((slider->sliderFlags & SLIDER_CALLED_FIRST) != 0)
 	{
@@ -910,20 +998,20 @@ void standardCallBacksForSlider::SliderVerticalDisplay(Slider* slider, void*)
 	if ((slider->sliderFlags & SLIDER_CALLED_FIRST) != 0)
 	{
 		slider->framePosition = slider->callPos + 0.5 * slider->frameSize;
-		slider->buttonPos = slider->framePosition + slider->refVector;
-		
+		slider->setButtonPos(slider->framePosition + slider->refVector);
 	}
 	if ((slider->sliderFlags & SLIDER_CALLED) != 0)
 	{
 		if (slider->framePosition.y > slider->callPos.y - 0.5 * slider->frameSize.y)
 		{
-			slider->framePosition.y -= 0.002f;
+			std::cout << slider->buttonData.callPos.y << std::endl;
+			slider->setButtonPos(slider->buttonPos + vec2sq<float>(0.0f, -0.002f));
 		}
 	}
 	else if ((slider->sliderFlags & SLIDER_CALLED) == 0)
 	{
 		if (slider->framePosition.y >= slider->callPos.y + 0.5 * slider->frameSize.y) slider->flags.if_display = 0;
-		else if (slider->framePosition.y < slider->callPos.y + 0.5 * slider->frameSize.y) slider->framePosition.y += 0.002f;
+		else if (slider->framePosition.y < slider->callPos.y + 0.5 * slider->frameSize.y) slider->setButtonPos(slider->buttonPos + vec2sq<float>(0.0f, 0.002f));
 	}
 }
 
@@ -951,6 +1039,7 @@ void InputField::CreateFontsAtlas()
 			std::cout << "ERROR::CAN'T_INITIALIZE_FT_LIB" << std::endl;
 			return;
 		}
+		std::cout << F "arial.ttf" << std::endl;
 		if (FT_New_Face(ft, F "arial.ttf", 0, &ft_face))
 		{
 			std::cout << "ERROR::FAILED_TO_LOAD_FONT" << std::endl;
@@ -969,7 +1058,7 @@ void InputField::CreateFontsAtlas()
 		{
 			glGenBuffers(1, &CharacterSSBO);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, CharacterSSBO);
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, CharacterSSBO);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, CharacterSSBO);
 			glBufferData(GL_SHADER_STORAGE_BUFFER, 256 * sizeof(Character_For_SSBO), nullptr, GL_STATIC_DRAW);
 		}
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -1031,6 +1120,7 @@ void InputField::CreateFontsAtlas()
 		glBindTexture(GL_TEXTURE_2D, 0);
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 	}
+	
 }
 
 void InputField::renderText()
@@ -1041,7 +1131,7 @@ void InputField::renderText()
 	glBindTexture(GL_TEXTURE_2D, CharacterAtlasTex);
 	textShader->use();
 	textShader->SetVec2("scale", scale);
-	textShader->SetInt("Mask", mask);
+	textShader->SetInt("Mask", buttonData.mask);
 	textShader->SetInt("Atlas", 0);
 	glDrawArraysInstanced(GL_TRIANGLES, 0, 6, 128);
 	glBindVertexArray(0);
@@ -1059,7 +1149,7 @@ void InputField::drawCursor()
 	cursor_and_selection_Shader->SetMat4("transform", cursorTransform);
 	cursor_and_selection_Shader->SetInt("type", 0);
 	cursor_and_selection_Shader->SetFloat("intensity", cursor_intensity);
-	cursor_and_selection_Shader->SetInt("Mask", mask);
+	cursor_and_selection_Shader->SetInt("Mask", buttonData.mask);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 	glBindVertexArray(0);
 }
@@ -1197,7 +1287,6 @@ void InputField::textSelection()
 	{
 		virt_cursorPos = cursorPos;
 		virt_cursorPos_in_text = cursorPos_in_text;
-		std::cout << "SELECTION" << std::endl;
 	}
 	if (flags.if_waits_to_be_pressed == 1 && flags.if_hovered == 1)
 	{
@@ -1254,14 +1343,14 @@ void InputField::drawSelectionRect()
 	glBindVertexArray(selectionVAO);
 	cursor_and_selection_Shader->use();
 	cursor_and_selection_Shader->SetInt("type", 1);
-	cursor_and_selection_Shader->SetInt("Mask", mask);
+	cursor_and_selection_Shader->SetInt("Mask", buttonData.mask);
 
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 	glBindVertexArray(0);
 }
 
-InputField::InputField(GLFWwindow* window, Shader& Text_Shader, Shader& Cursor_Shader, Shader& Button_Shader, std::string line_filename, float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static)
-	: Button(window, Button_Shader, line_filename, position, sizeX, sizeY, Mask, if_static, NULL, NULL, NULL, NULL, this), textShader(&Text_Shader), cursor_and_selection_Shader(&Cursor_Shader)
+InputField::InputField(GLFWwindow* window, Shader& Text_Shader, Shader& Cursor_Shader, Shader& globalShader, Shader& indivShader, std::string line_filename, float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static)
+	: Button(window, globalShader, indivShader, line_filename, position, sizeX, sizeY, Mask, if_static, NULL, NULL, NULL, this), textShader(&Text_Shader), cursor_and_selection_Shader(&Cursor_Shader)
 {
 	int winHEIGHT = Button::winData->HEIGHT;
 	inputFlags = 0;
@@ -1333,11 +1422,12 @@ InputField::InputField(GLFWwindow* window, Shader& Text_Shader, Shader& Cursor_S
 	glEnableVertexAttribArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
+	InputFields.push_back(this);
+
 }
 
-void InputField::drawInFBO(vec2sq<float> callPos)
+void InputField::drawTextInFBO()
 {
-	Button::drawInFBO(callPos);
 	inputOperations();
 	updateUBO();
 	manualCursorDesignation();
@@ -1346,6 +1436,14 @@ void InputField::drawInFBO(vec2sq<float> callPos)
 	drawSelectionRect();
 	drawCursor();
 	
+}
+
+void InputField::drawAllTexts()
+{
+	for (int i = 0; i < InputFields.size(); i++)
+	{
+		InputFields[i]->drawTextInFBO();
+	}
 }
 
 void key_callback(GLFWwindow* window, int key, int, int action, int mods)

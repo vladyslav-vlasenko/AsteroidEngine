@@ -13,18 +13,20 @@
 #include<string>
 #include "Shader.h"
 #include "Interface.h"
-#define PI 3.14
-#define PROC_LAUNCHED 1
-#define PROC_COMPLETED (1<<1)
+
 #define A ASSETS_PATH
 #define S SHADERS_PATH
 #define F FONTS_PATH
+
+#define PI 3.14
+#define PROC_LAUNCHED 1
+#define PROC_COMPLETED (1<<1)
 //MAX AMOUNT OF OBJECTS 50
 const float k = 0.1f; //gravitational constant
 const float dt = 0.00005f; //delta time between handling frames
-inline float time_scale = 0.8f; //modeling time and real time reference
-inline float traj_interval = 0.04f; //interval between points marking trajectory
-inline float delta_time;
+float time_scale = 0.8f; //modeling time and real time reference
+float traj_interval = 0.04f; //interval between points marking trajectory
+extern float delta_time;
 class Body;
 std::vector<Body*> objects;
 enum class Proc_Time
@@ -78,7 +80,7 @@ private:
 	unsigned char th_flags = 0;
 	Proc_Time when;
 	unsigned int texture, trajVAO, trajVBO;
-	
+	float sim_time;
 	vec2sq<float> position;
 	float scaling_param;
 	float trajIntensity = 0.0f; //trajectory color intensity
@@ -199,6 +201,7 @@ private:
 						return FUT_TYPE(traj, vels, display_traj);
 					});
 				th_flags |= PROC_LAUNCHED;
+				std::cout << "start" << std::endl;
 			}
 			else if ((th_flags & PROC_LAUNCHED) != 0)
 			{
@@ -254,11 +257,6 @@ private:
 		else
 		{
 			sim_time += time_scale*delta_time;
-			if (sim_time < 0)
-			{
-				std::cout << delta_time << std::endl;
-				std::cout << time_scale << std::endl;
-			}
 			int index = (int)(sim_time / dt) % trajectory.size();
 			position = { trajectory[index].x, trajectory[index].y * scaling_param };
 		}
@@ -303,14 +301,13 @@ public:
 	inline static unsigned int renderBuffer = 0;
 	inline static unsigned int allObjSSBO = 0;
 	inline static unsigned int allObjVAO = 0;
-	float sim_time;
 
 	Body(GLFWwindow* window, std::string filename, Shader* separateShader, const Proc_Time time,  const vec2sq<float>& initialPos, const vec2sq<float>& initialVel, float size, int Mask)
 		: initPos(initialPos), initVel(initialVel), when(time), selfShader(separateShader)
 	{
 		flags.clear();
 		setUp(window);
-		sim_time = 0.0f;
+		sim_time = 0;
 		scaling_param = winData->WIDTH * 1.0f/ winData->HEIGHT;
 		float vertices[20] =
 		{
@@ -444,7 +441,6 @@ void drawingInFBO(Shader& bodyShader, Shader& trajShader)
 	for (int i = 0; i < objects.size(); i++)
 	{
 		objects[i]->update();
-	
 	}
 	glBindVertexArray(Body::allObjVAO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, Body::allObjSSBO);

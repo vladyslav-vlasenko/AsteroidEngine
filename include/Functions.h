@@ -33,7 +33,7 @@ bool slider_appear_condition(Slider* slider, void* args)
 	Button* pace_button = (Button*)args;
 	if (pace_button->state() == true)
 	{
-		slider->callPos = vec2sq<float>(0.2f, 0.9f);
+		slider->setCallPos(vec2sq<float>(0.2f, 0.9f));
 		std::cout << "PACE" << std::endl;
 		return true;
 	}
@@ -53,5 +53,5 @@ bool slider_hide_condition(Slider* slider, void* args)
 void slider_callback(Button* slider, void* args)
 {
 	float* slider_value_ptr = (float*)args;
-	time_scale = (*slider_value_ptr) * 1.6f;
+	time_scale = (*slider_value_ptr)*1.6f;	
 }

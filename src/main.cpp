@@ -19,6 +19,7 @@ unsigned int scr_vert_ind[] =
 {
 	0, 1, 2,    0, 2, 3
 };
+float delta_time = 0;
 int main()
 {
 	glfwInit();
@@ -58,7 +59,8 @@ int main()
 	Shader indiv_body_shader(S "indiv_body_vertex_shader.vs", S "indiv_body_fragment_shader.fs");
 	Shader trajectory_shader(S "trajectory_vertex_shader.vs", S "trajectory_fragment_shader.fs");
 	Shader screen_shader(S "screen_vertex_shader.vs", S "screen_fragment_shader.fs");
-	Shader button_shader(S "button_vertex_shader.vs", S "button_fragment_shader.fs");
+	Shader indiv_button_shader(S "indiv_button_vertex_shader.vs", S "indiv_button_fragment_shader.fs");
+	Shader global_button_shader(S "global_button_vertex_shader.vs", S "global_button_fragment_shader.fs");
 	Shader interface_shader(S "screen_vertex_shader.vs", S "interface_fragment_shader.fs");
 	Shader buttonblock_shader(S "buttonblock_vertex_shader.vs", S "buttonblock_fragment_shader.fs");
 	Shader slider_shader(S "slider_vertex_shader.vs", S "slider_fragment_shader.fs");
@@ -66,22 +68,23 @@ int main()
 	Shader text_cursor_shader(S "text_cursor_vertex_shader.vs", S "text_cursor_fragment_shader.fs");
 	Body sun(window, A "Bodies/sun.jpg", &indiv_body_shader,Proc_Time::PROG_LAUNCH, { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0.05f, 10);
 	Body earth(window, A "Bodies/earth.png", &indiv_body_shader, Proc_Time::PROG_LAUNCH, { 0.3f, 0.0f }, { 0.0f, 0.67f }, 0.04f, 20);
+	
+	Button pace_button(window, global_button_shader, indiv_button_shader, A "Interface/pace_button.png", vec2sq<float>(-0.2f, 0.9f), 0.0f, 0.0f, 90, true, NULL, NULL);
 	standardCallBacksForBlocks::VerticalDisplay_args vec;
 	std::vector <std::string> filenames = { A "Interface/add_object_button.png", A "Interface/delete_object_button.png", A "Interface/show_all_trajectories.png"};
 	std::vector <int> Masks = { 30, 40, 50 };
 	std::vector <void (*)(Button*, void*)> BlockFunctions = {add_object_func, NULL, show_all_traj_func};
 	add_object_struct add_obj_args(window, &indiv_body_shader, nullptr);
 	std::vector <void*> BlockFunctionsArgs = { (void*)&add_obj_args, NULL, NULL };
-	ButtonBlock block1(window, filenames, buttonblock_shader, Masks, STANDARD_RIGHT_MOUSEBUTTON_CALL, STANDARD_LEFT_MOUSEBUTTON_HIDE, standardCallBacksForBlocks::VerticalDisplay, BlockFunctions, BlockFunctionsArgs, NULL, NULL, (void*)(&vec));
+	ButtonBlock block1(window, filenames, global_button_shader, indiv_button_shader, Masks, STANDARD_RIGHT_MOUSEBUTTON_CALL, STANDARD_LEFT_MOUSEBUTTON_HIDE, standardCallBacksForBlocks::VerticalDisplay, BlockFunctions, BlockFunctionsArgs, NULL, NULL, (void*)(&vec));
 	add_obj_args.block = &block1;
-	Button pace_button(window, button_shader, A "Interface/pace_button.png", vec2sq<float>(-0.2f, 0.9f), 0.0f, 0.0f, 90, true, NULL, NULL);
+	
 	standardCallBacksForSlider::Condition_struct AppeadConds(slider_appear_condition, (void*)(&pace_button));
 	standardCallBacksForSlider::Condition_struct HideConds(slider_hide_condition, (void*)window);
-	Slider slider(window, A "Interface/slider_frame_img.png", A "Interface/slider_point_img.png", vec2sq<float>(0.0f, 0.0f), slider_shader, slider_shader, 80, false, slider_callback, standardCallBacksForSlider::SliderAppear,
+	Slider slider(window, A "Interface/slider_frame_img.png", A "Interface/slider_point_img.png", vec2sq<float>(0.0f, 0.0f), global_button_shader, indiv_button_shader, slider_shader, 80, true, slider_callback, standardCallBacksForSlider::SliderAppear, 
 		standardCallBacksForSlider::SliderVerticalDisplay, standardCallBacksForSlider::SliderHide, NULL, (void*)(&AppeadConds), NULL, (void*)(&HideConds));
 	slider.button_callback_args = (void*)(&slider.slider_value);
-	InputField input(window, text_shader, text_cursor_shader, button_shader, A "Interface/input_line.png", 0, vec2sq<float>(0.5f, -0.8f), 0.0f, 0.0f, 100, true);
-
+	InputField input(window, text_shader, text_cursor_shader, global_button_shader, indiv_button_shader, A "Interface/input_line.png", 0, vec2sq<float>(0.5f, -0.8f), 0.0f, 0.0f, 100, true);
 	unsigned int scrVAO, scrVBO, scrEBO;
 	glGenVertexArrays(1, &scrVAO);
 	glGenBuffers(1, &scrVBO);
@@ -103,6 +106,7 @@ int main()
 	while (!glfwWindowShouldClose(window))
 	{
 		delta_time = glfwGetTime() - prevTime;
+		
 		prevTime = glfwGetTime();
 		glfwPollEvents();
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -117,7 +121,7 @@ int main()
 		glBindVertexArray(0);
 		block1.blockCall();
 		slider.sliderCall();
-		Button::displayButtons(interface_shader, scrVAO);
+		displayButtons(interface_shader, scrVAO);
 		glfwSwapBuffers(window);
 	}
 	glfwDestroyCursor(cursor);
