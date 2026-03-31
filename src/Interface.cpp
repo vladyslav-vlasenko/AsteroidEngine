@@ -1039,7 +1039,6 @@ void InputField::CreateFontsAtlas()
 			std::cout << "ERROR::CAN'T_INITIALIZE_FT_LIB" << std::endl;
 			return;
 		}
-		std::cout << F "arial.ttf" << std::endl;
 		if (FT_New_Face(ft, F "arial.ttf", 0, &ft_face))
 		{
 			std::cout << "ERROR::FAILED_TO_LOAD_FONT" << std::endl;

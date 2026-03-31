@@ -7,7 +7,7 @@ struct Characters
 	vec2 rl_st;
 };
 
-layout(std430, binding=1) buffer Character
+layout(std430, binding=2) buffer Character
 {
 	Characters characters[256];
 };
