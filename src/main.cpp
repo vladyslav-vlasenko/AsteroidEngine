@@ -68,23 +68,24 @@ int main()
 	Shader text_cursor_shader(S "text_cursor_vertex_shader.vs", S "text_cursor_fragment_shader.fs");
 	Body sun(window, A "Bodies/sun.jpg", &indiv_body_shader,Proc_Time::PROG_LAUNCH, { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0.05f, 10);
 	Body earth(window, A "Bodies/earth.png", &indiv_body_shader, Proc_Time::PROG_LAUNCH, { 0.3f, 0.0f }, { 0.0f, 0.67f }, 0.04f, 20);
-	
-	Button pace_button(window, global_button_shader, indiv_button_shader, A "Interface/pace_button.png", vec2sq<float>(-0.2f, 0.9f), 0.0f, 0.0f, 90, true, NULL, NULL);
+
+	ContextManager* context = ContextManager::InitContext(window);
+	Button pace_button(context, global_button_shader, indiv_button_shader, A "Interface/pace_button.png", vec2sq<float>(-0.2f, 0.9f), 0.0f, 0.0f, 90, true, NULL, NULL);
 	standardCallBacksForBlocks::VerticalDisplay_args vec;
 	std::vector <std::string> filenames = { A "Interface/add_object_button.png", A "Interface/delete_object_button.png", A "Interface/show_all_trajectories.png"};
 	std::vector <int> Masks = { 30, 40, 50 };
 	std::vector <void (*)(Button*, void*)> BlockFunctions = {add_object_func, NULL, show_all_traj_func};
 	add_object_struct add_obj_args(window, &indiv_body_shader, nullptr);
 	std::vector <void*> BlockFunctionsArgs = { (void*)&add_obj_args, NULL, NULL };
-	ButtonBlock block1(window, filenames, global_button_shader, indiv_button_shader, Masks, STANDARD_RIGHT_MOUSEBUTTON_CALL, STANDARD_LEFT_MOUSEBUTTON_HIDE, standardCallBacksForBlocks::VerticalDisplay, BlockFunctions, BlockFunctionsArgs, NULL, NULL, (void*)(&vec));
+	ButtonBlock block1(context, filenames, global_button_shader, indiv_button_shader, Masks, STANDARD_RIGHT_MOUSEBUTTON_CALL, STANDARD_LEFT_MOUSEBUTTON_HIDE, standardCallBacksForBlocks::VerticalDisplay, BlockFunctions, BlockFunctionsArgs, NULL, NULL, (void*)(&vec));
 	add_obj_args.block = &block1;
 	
 	standardCallBacksForSlider::Condition_struct AppeadConds(slider_appear_condition, (void*)(&pace_button));
 	standardCallBacksForSlider::Condition_struct HideConds(slider_hide_condition, (void*)window);
-	Slider slider(window, A "Interface/slider_frame_img.png", A "Interface/slider_point_img.png", vec2sq<float>(0.0f, 0.0f), global_button_shader, indiv_button_shader, slider_shader, 80, true, slider_callback, standardCallBacksForSlider::SliderAppear, 
+	Slider slider(context, A "Interface/slider_frame_img.png", A "Interface/slider_point_img.png", vec2sq<float>(0.0f, 0.0f), global_button_shader, indiv_button_shader, slider_shader, 80, true, slider_callback, standardCallBacksForSlider::SliderAppear, 
 		standardCallBacksForSlider::SliderVerticalDisplay, standardCallBacksForSlider::SliderHide, NULL, (void*)(&AppeadConds), NULL, (void*)(&HideConds));
 	slider.button_callback_args = (void*)(&slider.slider_value);
-	InputField input(window, text_shader, text_cursor_shader, global_button_shader, indiv_button_shader, A "Interface/input_line.png", 0, vec2sq<float>(0.5f, -0.8f), 0.0f, 0.0f, 100, true);
+	InputField input(context, text_shader, text_cursor_shader, global_button_shader, indiv_button_shader, A "Interface/input_line.png", 0, vec2sq<float>(0.5f, -0.8f), 0.0f, 0.0f, 100, true);
 	unsigned int scrVAO, scrVBO, scrEBO;
 	glGenVertexArrays(1, &scrVAO);
 	glGenBuffers(1, &scrVBO);
@@ -101,7 +102,7 @@ int main()
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
 	float prevTime = glfwGetTime();
-	
+
 	
 	while (!glfwWindowShouldClose(window))
 	{
@@ -112,6 +113,7 @@ int main()
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 		drawingInFBO(global_body_shader, trajectory_shader);
+
 		glBindVertexArray(scrVAO);
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, Body::texColor);
@@ -119,9 +121,13 @@ int main()
 		screen_shader.SetInt("Tex", 0);
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 		glBindVertexArray(0);
+		
 		block1.blockCall();
+		
 		slider.sliderCall();
-		displayButtons(interface_shader, scrVAO);
+		
+
+		displayButtons(context, interface_shader, scrVAO);
 		glfwSwapBuffers(window);
 	}
 	glfwDestroyCursor(cursor);
