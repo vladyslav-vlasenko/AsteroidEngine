@@ -85,7 +85,11 @@ int main()
 	Slider slider(context, A "Interface/slider_frame_img.png", A "Interface/slider_point_img.png", vec2sq<float>(0.0f, 0.0f), global_button_shader, indiv_button_shader, slider_shader, 80, true, slider_callback, standardCallBacksForSlider::SliderAppear, 
 		standardCallBacksForSlider::SliderVerticalDisplay, standardCallBacksForSlider::SliderHide, NULL, (void*)(&AppeadConds), NULL, (void*)(&HideConds));
 	slider.button_callback_args = (void*)(&slider.slider_value);
-	InputField input(context, text_shader, text_cursor_shader, global_button_shader, indiv_button_shader, A "Interface/input_line.png", 0, vec2sq<float>(0.5f, -0.8f), 0.0f, 0.0f, 100, true);
+	standardCallBacksForInputField::Condition_struct InputAppearConds(input_field_appear_condition, (void*)window);
+	standardCallBacksForInputField::Condition_struct InputHideConds(input_field_hide_condition, (void*)window);
+	InputField input(context, text_shader, text_cursor_shader, global_button_shader, indiv_button_shader, A "Interface/input_line.png", 0, vec2sq<float>(0.5f, -0.8f), 0.0f, 0.0f, 100, false, 
+		standardCallBacksForInputField::InputFieldAppear, standardCallBacksForInputField::InputFieldHide, standardCallBacksForInputField::InputFieldDisplay, (void*)&InputAppearConds,
+		(void*)&InputHideConds, NULL);
 	unsigned int scrVAO, scrVBO, scrEBO;
 	glGenVertexArrays(1, &scrVAO);
 	glGenBuffers(1, &scrVBO);

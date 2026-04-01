@@ -5,8 +5,10 @@ layout(location=1) out int FragMask;
 uniform float intensity;
 in flat int Type;
 uniform int Mask;
+
 void main()
 {
+	
 	if (Type == 0)
 	{
 		FragColor = vec4(1.0f, 0.0f, 0.0f, intensity/255);

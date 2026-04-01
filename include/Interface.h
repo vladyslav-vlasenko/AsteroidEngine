@@ -32,10 +32,11 @@
 #define SLIDER_WAIT_TO_CLOSE (1<<2)
 
 #define INPUT_FIRST_LAUNCH 1
-#define INPUT_ACTIVE (1<<1)
-#define INPUT_NOT_UPDATED (1<<2)
-#define	INPUT_NEW_LETTER (1<<3)
-#define INPUT_TEXT_SHIFT (1<<4)
+#define INPUT_CALLED (1<<1)
+#define INPUT_ACTIVE (1<<2)
+#define INPUT_NOT_UPDATED (1<<3)
+#define	INPUT_NEW_LETTER (1<<4)
+#define INPUT_TEXT_SHIFT (1<<5)
 
 
 #define TEXT_BACKSPACE 1
@@ -207,7 +208,8 @@ class InputField;
 class ContextManager
 {
 private:
-	
+	static std::unique_ptr<Shader> globalButtonShader;
+	static std::unique_ptr<Shader> indivButtonShader;
 	void CreateUtilities();
 	static bool CheckIfFirst(GLFWwindow* window);
 	ContextManager(GLFWwindow* window);
@@ -227,8 +229,10 @@ public:
 	std::vector<BUTTON_SSBO> Buttons_SSBO_storage;
 	std::vector<Slider*> Sliders;
 	std::vector<InputField*> InputFields;
+	
 	static ContextManager* InitContext(GLFWwindow* window);
 	static void ReleaseContext(ContextManager* context);
+
 };
 
 class Button
@@ -401,17 +405,23 @@ private:
 	float cursor_intensity;
 	float virt_cursorPos; //NDC position of virtual cursor intended for text selection
 	int virt_cursorPos_in_text; //position of virtual cursor in text
-	float baseline; //Y-coordinate of a baseline for correct text allignment
+	
 	vec2sq<float> pos_in_SC; //position in screen coordinates
-	unsigned char inputFlags;
+	
 	float res_text_size;
 	float text_stride_scale_param;
 	std::string intended_text;
 	std::string printed_text;
 	std::vector<int> letter_list; //list of letters
-	std::vector<glm::mat4> transforms;
+	std::vector<glm::mat4> letter_transforms;
 	std::vector<vec2sq<float>> letterPos_list; //list of letters' positions
 	unsigned int amount_symb_updated;
+	void (*appear_func)(InputField*, void*);
+	void (*display_func)(InputField*, void*);
+	void (*hide_func)(InputField*, void*);
+	void* appear_args;
+	void* display_args;
+	void* hide_args;
 	static unsigned int amount;
 	static FT_Library ft;
 	static FT_Face ft_face;
@@ -425,13 +435,37 @@ private:
 	void manualCursorDesignation();
 	void textSelection();
 	void drawSelectionRect();
+	void activateInputField();
 	void drawTextInFBO();
 public:
-	InputField(ContextManager* currentContext, Shader& Text_Shader, Shader& Cursor_Shader, Shader& globalShader, Shader& indivShader, std::string line_filename, float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static);
+	unsigned char inputFlags;
+	vec2sq<float> callPos;
+	float baseline; //Y-coordinate of a baseline for correct text allignment
+	void transferAllSymbols(vec2sq<float> delta);
+	InputField(ContextManager* currentContext, Shader& Text_Shader, Shader& Cursor_Shader, Shader& globalShader, Shader& indivShader, std::string line_filename, 
+		float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static, void (*InputFieldAppearFunc)(InputField*, void*),
+		void (*InputFieldHideFunc)(InputField*, void*), void (*InputFieldDisplayFunc)(InputField*, void*), void* InputFieldAppear_args,
+		void* InputFieldHide_args, void* InputFieldDisplay_args);
+	void setCallPos(vec2sq<float> Call_Position);
 	static void drawAllTexts(ContextManager* currentContext);
 	friend void key_callback(GLFWwindow* window, int key, int, int action, int mods);
 	friend void char_callback(GLFWwindow* window, unsigned int codepoint);
 };
+
+namespace standardCallBacksForInputField
+{
+	struct Condition_struct
+	{
+		bool (*condition_func)(InputField* inputField, void* condition_args);
+		void* condition_args;
+		Condition_struct(bool (*CondFunc)(InputField* inputField, void* condition_args), void* CondArgs)
+			: condition_func(CondFunc), condition_args(CondArgs)
+		{}
+	};
+	void InputFieldAppear(InputField* input, void* args);
+	void InputFieldHide(InputField* input, void* args);
+	void InputFieldDisplay(InputField* input, void* args);
+}
 
 void drawAllElementsInFBO(ContextManager* context);
 void displayButtons(ContextManager* context, Shader& interfaceShader, unsigned int scrVAO);

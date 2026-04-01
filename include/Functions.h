@@ -55,3 +55,24 @@ void slider_callback(Button* slider, void* args)
 	float* slider_value_ptr = (float*)args;
 	time_scale = (*slider_value_ptr)*1.6f;	
 }
+
+bool input_field_appear_condition(InputField* input, void* args)
+{
+	GLFWwindow* window = (GLFWwindow*)args;
+	if (glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS)
+	{
+		input->setCallPos(vec2sq<float>( 0.5f, 0.2f));
+		return true;
+	}
+	return false;
+}
+
+bool input_field_hide_condition(InputField* input, void* args)
+{
+	GLFWwindow* window = (GLFWwindow*)args;
+	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+	{
+		return true;
+	}
+	return false;
+}

@@ -95,6 +95,9 @@ void generateTexture(unsigned int& texture, unsigned char* data, int& width, int
 /***********************************************************************/
 
 
+std::unique_ptr<Shader> ContextManager::globalButtonShader = nullptr;
+std::unique_ptr<Shader> ContextManager::indivButtonShader = nullptr;
+
 bool ContextManager::CheckIfFirst(GLFWwindow* window)
 {
 	for (int i = 0; i < Contexts.size(); i++)
@@ -152,7 +155,12 @@ ContextManager::ContextManager(GLFWwindow* window) :
 	winData = (windowData*)glfwGetWindowUserPointer(window);
 	CreateUtilities();
 	Contexts.push_back(this);
-	
+	if (globalButtonShader == nullptr && indivButtonShader == nullptr)
+	{
+		globalButtonShader = std::make_unique<Shader>(Shader(S "global_button_vertex_shader.vs", S "global_button_fragment_shader.fs"));
+		//indivButtonShader = std::make_unique<Shader>(
+	}
+
 }
 
 ContextManager::~ContextManager()
@@ -1006,62 +1014,6 @@ void standardCallBacksForBlocks::VerticalDisplay(ButtonBlock * block, void* args
 }
 
 
-//For namespace standardCallBacksForSlider
-/***********************************************************************/
-/***********************************************************************/
-/***********************************************************************/
-
-
-void standardCallBacksForSlider::SliderAppear(Slider* slider, void* args)
-{
-	Condition_struct* casted_args = (Condition_struct*)args;
-	
-	if (casted_args->condition_func(slider, casted_args->condition_args) == true && (slider->sliderFlags & SLIDER_CALLED) == 0)
-	{
-		slider->CallButton(true);
-		slider->sliderFlags |= SLIDER_CALLED;
-		slider->sliderFlags |= SLIDER_CALLED_FIRST;
-		slider->flags.if_display = 1;
-		
-	}
-	else if ((slider->sliderFlags & SLIDER_CALLED_FIRST) != 0)
-	{
-		slider->sliderFlags &= ~SLIDER_CALLED_FIRST;
-	}
-}
-
-void standardCallBacksForSlider::SliderHide(Slider* slider, void* args)
-{
-	Condition_struct* casted_args = (Condition_struct*)args;
-
-	if (casted_args->condition_func(slider, casted_args->condition_args) == true && (slider->sliderFlags & SLIDER_CALLED) != 0)
-	{
-		slider->sliderFlags &= ~SLIDER_CALLED;
-		slider->CallButton(false);
-	}
-}
-
-void standardCallBacksForSlider::SliderVerticalDisplay(Slider* slider, void*)
-{
-	if ((slider->sliderFlags & SLIDER_CALLED_FIRST) != 0)
-	{
-		slider->framePosition = slider->callPos + 0.5 * slider->frameSize;
-		slider->setButtonPos(slider->framePosition + slider->refVector);
-	}
-	if ((slider->sliderFlags & SLIDER_CALLED) != 0)
-	{
-		if (slider->framePosition.y > slider->callPos.y - 0.5 * slider->frameSize.y)
-		{
-			std::cout << slider->buttonData.callPos.y << std::endl;
-			slider->setButtonPos(slider->buttonPos + vec2sq<float>(0.0f, -0.002f));
-		}
-	}
-	else if ((slider->sliderFlags & SLIDER_CALLED) == 0)
-	{
-		if (slider->framePosition.y >= slider->callPos.y + 0.5 * slider->frameSize.y) slider->flags.if_display = 0;
-		else if (slider->framePosition.y < slider->callPos.y + 0.5 * slider->frameSize.y) slider->setButtonPos(slider->buttonPos + vec2sq<float>(0.0f, 0.002f));
-	}
-}
 
 
 //For class InputField
@@ -1180,6 +1132,7 @@ void InputField::renderText()
 	textShader->SetVec2("scale", scale);
 	textShader->SetInt("Mask", buttonData.mask);
 	textShader->SetInt("Atlas", 0);
+	textShader->SetVec2("callPos", buttonData.callPos);
 	glDrawArraysInstanced(GL_TRIANGLES, 0, 6, 128);
 	glBindVertexArray(0);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
@@ -1188,24 +1141,28 @@ void InputField::renderText()
 
 void InputField::drawCursor()
 {
+	if ((inputFlags & INPUT_ACTIVE) != 0)
+	{
+		cursor_intensity = (sin(6.0f * glfwGetTime()) > 0) ? 255.0f * sin(6.0f * glfwGetTime()) : 0;
+		glBindVertexArray(cursorVAO);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+		cursor_and_selection_Shader->use();
+		cursor_and_selection_Shader->SetMat4("transform", cursorTransform);
+		cursor_and_selection_Shader->SetInt("type", 0);
+		cursor_and_selection_Shader->SetFloat("intensity", cursor_intensity);
+		cursor_and_selection_Shader->SetInt("Mask", buttonData.mask);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+		glBindVertexArray(0);
+	}
 	
-	cursor_intensity = (sin(6.0f * glfwGetTime())>0) ? 255.0f * sin(6.0f*glfwGetTime()) : 0;
-	glBindVertexArray(cursorVAO);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-	cursor_and_selection_Shader->use();
-	cursor_and_selection_Shader->SetMat4("transform", cursorTransform);
-	cursor_and_selection_Shader->SetInt("type", 0);
-	cursor_and_selection_Shader->SetFloat("intensity", cursor_intensity);
-	cursor_and_selection_Shader->SetInt("Mask", buttonData.mask);
-	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-	glBindVertexArray(0);
 }
 
 void InputField::updateUBO()
 {
 	scale = glm::vec2(2.0f / context->winData->WIDTH, 2.0f / context->winData->HEIGHT);
-	if (printed_text != intended_text)
+	if (printed_text != intended_text || (inputFlags & INPUT_TEXT_SHIFT) != 0)
 	{
+		inputFlags &= ~INPUT_TEXT_SHIFT;
 		std::cout << "NOT EQUAL" << std::endl;
 		letter_list.assign(128, -1);
 		float virt_cursorPos = strBegin;
@@ -1218,7 +1175,7 @@ void InputField::updateUBO()
 			char symbol = (char)*c;
 			vec2sq<float> letter_pos = vec2sq<float>(virt_cursorPos + 2.0f * res_text_size * Characters[(int)symbol].Bearing.x / winWIDTH, baseline + 2.0f * res_text_size * Characters[(int)symbol].Bearing.y / winHEIGHT);
 			glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(letter_pos.x, letter_pos.y, 0.0f));
-			transforms[i] = transform;
+			letter_transforms[i] = transform;
 			letter_list[i] = (int)symbol;
 			letterPos_list[i] = letter_pos;
 			virt_cursorPos += text_stride_scale_param * 2.0f * (Characters[(int)symbol].Advance) / winWIDTH;
@@ -1229,8 +1186,9 @@ void InputField::updateUBO()
 			cursorTransform = glm::translate(glm::mat4(1.0f), glm::vec3(cursorPos, buttonPos.y, 0.0f));
 			inputFlags &= ~INPUT_FIRST_LAUNCH;
 		}
+		
 		glBindBuffer(GL_UNIFORM_BUFFER, UBO);
-		glBufferSubData(GL_UNIFORM_BUFFER, 2 * sizeof(float) + sizeof(glm::vec2), 128 * sizeof(glm::mat4), transforms.data());
+		glBufferSubData(GL_UNIFORM_BUFFER, 2 * sizeof(float) + sizeof(glm::vec2), 128 * sizeof(glm::mat4), letter_transforms.data());
 		glBufferSubData(GL_UNIFORM_BUFFER, 2 * sizeof(float) + sizeof(glm::vec2) + 128 * sizeof(glm::mat4), 128 * sizeof(int), letter_list.data());
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 		printed_text = intended_text;
@@ -1396,12 +1354,44 @@ void InputField::drawSelectionRect()
 	glBindVertexArray(0);
 }
 
-InputField::InputField(ContextManager* currentContext, Shader& Text_Shader, Shader& Cursor_Shader, Shader& globalShader, Shader& indivShader, std::string line_filename, float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static)
-	: Button(currentContext, globalShader, indivShader, line_filename, position, sizeX, sizeY, Mask, if_static, NULL, NULL, NULL, this), textShader(&Text_Shader), cursor_and_selection_Shader(&Cursor_Shader)
+void InputField::activateInputField()
+{
+	if ((inputFlags & INPUT_ACTIVE) == 0 && flags.if_pressed == 1)
+		inputFlags |= INPUT_ACTIVE;
+	else if(((inputFlags & INPUT_ACTIVE) != 0 && context->winData->mouse_pressed == true) && flags.if_hovered == 0)
+		inputFlags &= ~INPUT_ACTIVE;
+}
+
+void InputField::transferAllSymbols(vec2sq<float> pos)
+{
+	strBegin = pos.x - size.x / 2 + 0.01f * size.x;
+	strEnd = pos.x + size.x / 2 - 0.01f * size.x;
+	//std::cout << "TRANSFER" << std::endl;
+	baseline = pos.y - 32 * res_text_size / (context->winData->HEIGHT);
+//	std::cout <<"BASELINE:" << baseline << std::endl;
+	std::cout << "POSY:" << buttonPos.y << std::endl;
+	vec2sq<float> prevPos = letterPos_list[0];
+	letterPos_list[0].x = strBegin;
+	inputFlags |= INPUT_TEXT_SHIFT;
+	//std::cout << "STRBEGIN:" << strBegin << std::endl;
+	
+}
+
+
+InputField::InputField(ContextManager* currentContext, Shader& Text_Shader, Shader& Cursor_Shader, Shader& globalShader, Shader& indivShader, std::string line_filename,
+	float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static, void (*InputFieldAppearFunc)(InputField*, void*),
+	void (*InputFieldHideFunc)(InputField*, void*), void (*InputFieldDisplayFunc)(InputField*, void*), void* InputFieldAppear_args = NULL,
+	void* InputFieldHide_args = NULL, void* InputFieldDisplay_args = NULL)
+	: Button(currentContext, globalShader, indivShader, line_filename, position, sizeX, sizeY, Mask, if_static, NULL, NULL, NULL, this), textShader(&Text_Shader),
+	cursor_and_selection_Shader(&Cursor_Shader), appear_func(InputFieldAppearFunc), hide_func(InputFieldHideFunc), display_func(InputFieldDisplayFunc),
+	appear_args(InputFieldAppear_args), hide_args(InputFieldHide_args), display_args(InputFieldDisplay_args)
 {
 	int winHEIGHT = context->winData->HEIGHT;
 	inputFlags = 0;
-	inputFlags |= (INPUT_ACTIVE | INPUT_FIRST_LAUNCH);
+	if (if_static)
+	{
+		inputFlags |= (INPUT_FIRST_LAUNCH | INPUT_CALLED);
+	}
 	intended_text = "BCDfjfldhg";
 	printed_text = "";
 	cursorPos_in_text = intended_text.length();
@@ -1430,7 +1420,7 @@ InputField::InputField(ContextManager* currentContext, Shader& Text_Shader, Shad
 	cursorWidth = 2.0f / context->winData->WIDTH;
 	letter_list.resize(128);
 	letterPos_list.resize(128);
-	transforms.resize(128);
+	letter_transforms.resize(128);
 	letter_list.assign(128, -1);
 	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(float), &res_text_size);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
@@ -1473,15 +1463,29 @@ InputField::InputField(ContextManager* currentContext, Shader& Text_Shader, Shad
 
 }
 
+void InputField::setCallPos(vec2sq<float> Call_Position)
+{
+	callPos = Call_Position;
+	setButtonCallPos(Call_Position, GCDenum::GCD_NDC);
+}
+
 void InputField::drawTextInFBO()
 {
-	inputOperations();
-	updateUBO();
-	manualCursorDesignation();
-	textSelection();
-	renderText();
-	drawSelectionRect();
-	drawCursor();
+	appear_func(this, appear_args);
+	display_func(this, display_args);
+	hide_func(this, hide_args);
+	if (flags.if_display == 1)
+	{
+		activateInputField();
+		inputOperations();
+		updateUBO();
+		manualCursorDesignation();
+		textSelection();
+		renderText();
+		drawSelectionRect();
+		drawCursor();
+
+	}
 	
 }
 
@@ -1557,6 +1561,117 @@ void char_callback(GLFWwindow* window, unsigned int codepoint)
 }
 
 
+//For namespace standardCallBacksForSlider
+/***********************************************************************/
+/***********************************************************************/
+/***********************************************************************/
 
 
+void standardCallBacksForSlider::SliderAppear(Slider* slider, void* args)
+{
+	Condition_struct* casted_args = (Condition_struct*)args;
+
+	if (casted_args->condition_func(slider, casted_args->condition_args) == true && (slider->sliderFlags & SLIDER_CALLED) == 0)
+	{
+		slider->CallButton(true);
+		slider->sliderFlags |= SLIDER_CALLED;
+		slider->sliderFlags |= SLIDER_CALLED_FIRST;
+
+		slider->flags.if_display = 1;
+
+	}
+	else if ((slider->sliderFlags & SLIDER_CALLED_FIRST) != 0)
+	{
+		slider->sliderFlags &= ~SLIDER_CALLED_FIRST;
+	}
+}
+
+void standardCallBacksForSlider::SliderHide(Slider* slider, void* args)
+{
+	Condition_struct* casted_args = (Condition_struct*)args;
+
+	if (casted_args->condition_func(slider, casted_args->condition_args) == true && (slider->sliderFlags & SLIDER_CALLED) != 0)
+	{
+		slider->sliderFlags &= ~SLIDER_CALLED;
+		slider->CallButton(false);
+	}
+}
+
+void standardCallBacksForSlider::SliderVerticalDisplay(Slider* slider, void*)
+{
+	if ((slider->sliderFlags & SLIDER_CALLED_FIRST) != 0)
+	{
+		slider->framePosition = slider->callPos + 0.5 * slider->frameSize;
+		slider->setButtonPos(slider->framePosition + slider->refVector);
+	}
+	if ((slider->sliderFlags & SLIDER_CALLED) != 0)
+	{
+		if (slider->framePosition.y > slider->callPos.y - 0.5 * slider->frameSize.y)
+		{
+			std::cout << slider->buttonData.callPos.y << std::endl;
+			slider->setButtonPos(slider->buttonPos + vec2sq<float>(0.0f, -0.002f));
+		}
+	}
+	else if ((slider->sliderFlags & SLIDER_CALLED) == 0)
+	{
+		if (slider->framePosition.y >= slider->callPos.y + 0.5 * slider->frameSize.y) slider->flags.if_display = 0;
+		else if (slider->framePosition.y < slider->callPos.y + 0.5 * slider->frameSize.y) slider->setButtonPos(slider->buttonPos + vec2sq<float>(0.0f, 0.002f));
+	}
+}
+
+
+
+void standardCallBacksForInputField::InputFieldAppear(InputField* input, void* args)
+{
+	Condition_struct* casted_args = (Condition_struct*)args;
+
+	if (casted_args->condition_func(input, casted_args->condition_args) == true && (input->inputFlags & INPUT_CALLED) == 0)
+	{
+		input->CallButton(true);
+		input->inputFlags |= INPUT_CALLED;
+		input->inputFlags |= INPUT_FIRST_LAUNCH;
+		input->setButtonPos(input->callPos + 0.5 * input->size);
+		input->transferAllSymbols(input->buttonPos + 0.5f * vec2sq<float>(-input->size.x, input->size.y));
+		input->flags.if_display = 1;
+	}
+}
+
+void standardCallBacksForInputField::InputFieldHide(InputField* input, void* args)
+{
+	Condition_struct* casted_args = (Condition_struct*)args;
+	if (casted_args->condition_func(input, casted_args->condition_args) == true && (input->inputFlags & INPUT_CALLED) != 0)
+	{
+		input->inputFlags &= ~INPUT_CALLED;
+		input->inputFlags &= ~INPUT_ACTIVE;
+		input->CallButton(false);
+	}
+
+}
+
+void standardCallBacksForInputField::InputFieldDisplay(InputField* input, void* args)
+{
+	if ((input->inputFlags & INPUT_FIRST_LAUNCH) != 0)
+	{
+		input->setButtonPos(input->callPos + 0.5 * input->size);
+		input->transferAllSymbols(input->callPos + 0.5 * input->size);
+		input->inputFlags &= ~INPUT_FIRST_LAUNCH;
+	}
+	if ((input->inputFlags & INPUT_CALLED) != 0)
+	{
+		if (input->buttonPos.y > input->callPos.y - 0.5 * input->size.y)
+		{
+			input->setButtonPos(input->buttonPos + vec2sq<float>(0.0f, -0.002f));
+			input->transferAllSymbols(input->buttonPos);
+		}
+	}
+	else if ((input->inputFlags & INPUT_CALLED) == 0 && input->flags.if_display != 0)
+	{
+		if (input->buttonPos.y >= input->callPos.y + 0.5 * input->size.y) input->flags.if_display = 0;
+		else if (input->buttonPos.y < input->callPos.y + 0.5 * input->size.y)
+		{
+			input->setButtonPos(input->buttonPos + vec2sq<float>(0.0f, 0.002f));
+			input->transferAllSymbols(input->buttonPos);
+		}
+	}
+}
 
