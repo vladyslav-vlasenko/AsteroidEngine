@@ -204,18 +204,20 @@ class InputField;
 /*********************************************************************************/
 /*********************************************************************************/
 /*********************************************************************************/
-
 class ContextManager
 {
 private:
-	static std::unique_ptr<Shader> globalButtonShader;
-	static std::unique_ptr<Shader> indivButtonShader;
+	
 	void CreateUtilities();
 	static bool CheckIfFirst(GLFWwindow* window);
 	ContextManager(GLFWwindow* window);
 	~ContextManager();
 public:
-	
+	static Shader* globalButtonShader;
+	static Shader* indivButtonShader;
+	static Shader* textInputShader;
+	static Shader* cursorInputShader;
+	static Shader* sliderShader;
 	GLFWwindow* win;
 	windowData* winData;
 	//globalTexMask - texture that stores masked pixels for FBO
@@ -255,11 +257,9 @@ public:
 	void (*button_callback)(Button*, void*);
 	void* button_callback_args;
 	Shader* shader;
-	static Shader* global_shader;
-	static Shader* indiv_shader;
 	BUTTON_FLAGS flags;
-	Button(ContextManager* currentContext, Shader& globalShader, Shader& indivShader, std::string filename, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static, void (*buttonCallback)(Button* button, void* args),
-		void* args, Slider* slider = NULL, InputField* input_field = NULL);
+	Button(ContextManager* currentContext, std::string filename, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static, void (*buttonCallback)(Button* button, void* args),
+		void* args);
 	virtual ~Button();
 	bool updateDataInSSBO();
 	void drawButtonIndiv();
@@ -294,7 +294,7 @@ public:
 	vec2sq<float> targetPos;
 	vec2sq<float> blockSize;
 	int active_button_num;
-	ButtonBlock(ContextManager* currentContext, std::vector<std::string>& filenames, Shader& globalShader, Shader& indivShader, std::vector<int>& Masks,
+	ButtonBlock(ContextManager* currentContext, std::vector<std::string>& filenames, std::vector<int>& Masks,
 		void (*CallFunctionCallback)(ButtonBlock*, void* args), void (*HideFunctionCallback)(ButtonBlock* block, void* args),
 		void (*DisplayingFunctionCallback)(ButtonBlock*, void* args), std::vector<void (*)(Button*, void*)> ButtonsFunction, std::vector<void*>& buttons_function_args,
 		void* call_args = NULL, void* hide_args = NULL, void* display_args = NULL);
@@ -329,7 +329,6 @@ class Slider : public Button
 {
 private:
 	unsigned int frameVAO, frameVBO, frameEBO, frameTex;
-	Shader* frameShader;
 	char sliderFlags;
 	vec2sq<float> framePosition;
 	vec2sq<float> frameSize;
@@ -353,8 +352,7 @@ private:
 public:
 	float slider_value; //given in interval [0; 1]
 	vec2sq<float> callPos;
-	Slider(ContextManager* currentContext, std::string sliderFrame_img, std::string sliderPoint_img, vec2sq<float> sliderPos, Shader& globalShader, Shader& indivShader,
-		Shader& frame_shader, int Mask, bool if_static, void (*SliderCallback)(Button* slider, void* args), void (*SliderAppear)(Slider* slider, void* args),
+	Slider(ContextManager* currentContext, std::string sliderFrame_img, std::string sliderPoint_img, vec2sq<float> sliderPos, int Mask, bool if_static, void (*SliderCallback)(Button* slider, void* args), void (*SliderAppear)(Slider* slider, void* args),
 		void (*SliderDisplay)(Slider* slider, void* args), void (*SliderHide)(Slider* slider, void* args), void* SliderCallback_args = NULL, 
 		void* SliderAppear_args = NULL, void* SliderDisplay_args = NULL, void* SliderHide_args = NULL);
 	~Slider();
@@ -393,8 +391,6 @@ class InputField : public Button
 {
 private:
 	unsigned int textVAO, UBO, cursorVAO, cursorVBO, EBO, selectionVAO, selectionVBO;
-	Shader* textShader;
-	Shader* cursor_and_selection_Shader;
 	float strBegin; //X-coordinate of the begining of the str
 	float strEnd; //X-coordinate of the end of the str
 	float effectiveFieldHeight;
@@ -442,7 +438,7 @@ public:
 	vec2sq<float> callPos;
 	float baseline; //Y-coordinate of a baseline for correct text allignment
 	void transferAllSymbols(vec2sq<float> delta);
-	InputField(ContextManager* currentContext, Shader& Text_Shader, Shader& Cursor_Shader, Shader& globalShader, Shader& indivShader, std::string line_filename, 
+	InputField(ContextManager* currentContext, std::string line_filename, 
 		float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, bool if_static, void (*InputFieldAppearFunc)(InputField*, void*),
 		void (*InputFieldHideFunc)(InputField*, void*), void (*InputFieldDisplayFunc)(InputField*, void*), void* InputFieldAppear_args,
 		void* InputFieldHide_args, void* InputFieldDisplay_args);
@@ -469,3 +465,4 @@ namespace standardCallBacksForInputField
 
 void drawAllElementsInFBO(ContextManager* context);
 void displayButtons(ContextManager* context, Shader& interfaceShader, unsigned int scrVAO);
+void checkFPS(float delta_time);
