@@ -166,6 +166,7 @@ ContextManager::ContextManager(GLFWwindow* window) :
 		cursorInputShader = new Shader(S "text_cursor_vertex_shader.vs", S "text_cursor_fragment_shader.fs");
 		sliderShader = new Shader(S "slider_vertex_shader.vs", S "slider_fragment_shader.fs");
 	}
+	
 }
 
 ContextManager::~ContextManager()
@@ -238,7 +239,34 @@ void Button::setButtonUtilities()
 		glBufferStorage(GL_SHADER_STORAGE_BUFFER, 50 * sizeof(BUTTON_SSBO), nullptr, GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT | GL_MAP_WRITE_BIT);
 		SSBO_map_ptr = glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, 50*sizeof(BUTTON_SSBO), GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT|GL_MAP_WRITE_BIT);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-		
+
+		float vert_coord[20] =
+		{
+			-1.0f, -1.0f, 0.0f,     0.0f, 0.0f,
+			-1.0f,  1.0f, 0.0f,     0.0f, 1.0f,
+			 1.0f,  1.0f, 0.0f,     1.0f, 1.0f,
+			 1.0f, -1.0f, 0.0f,     1.0f, 0.0f
+		};
+
+		unsigned int vert_ind[6] =
+		{
+			0, 1, 2,    0, 2, 3
+		};
+
+		glGenVertexArrays(1, &context->indivButtonVAO);
+		glGenBuffers(1, &context->indivButtonVBO);
+		glGenBuffers(1, &context->indivButtonEBO);
+		glBindVertexArray(context->indivButtonVAO);
+		glBindBuffer(GL_ARRAY_BUFFER, context->indivButtonVBO);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, context->indivButtonEBO);
+		glBufferData(GL_ARRAY_BUFFER, 20 * sizeof(float), vert_coord, GL_STATIC_DRAW);
+		glVertexAttribPointer(0, 3, GL_FLOAT, false, 5 * sizeof(float), 0);
+		glVertexAttribPointer(1, 2, GL_FLOAT, false, 5 * sizeof(float), (void*)(3*sizeof(float)));
+		glEnableVertexAttribArray(0);
+		glEnableVertexAttribArray(1);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, 6 * sizeof(unsigned int), vert_ind, GL_STATIC_DRAW);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glBindVertexArray(0);
 	}
 }
 
@@ -256,16 +284,7 @@ Button::Button(ContextManager* currentContext, std::string filename, vec2sq<floa
 	buttonData.TexHandler = glGetTextureHandleARB(texture);
 	glMakeTextureHandleResidentARB(buttonData.TexHandler);
 
-	if (if_static)
-	{
-		flags.if_static = true;
-		flags.if_display = true;
-		flags.if_called = true;
-		buttonPos = position;
-		buttonData.callPos = vec2sq<float>(-2.0f, 0.0f);
-		buttonData.transform = glm::translate(glm::mat4(1.0f), glm::vec3(glm::vec2(buttonPos), 0.0f));
-		buttonData.if_draw = 1;
-	}
+	
 	float dimX, dimY;
 	if (sizeX == 0 && sizeY == 0)
 	{
@@ -278,37 +297,24 @@ Button::Button(ContextManager* currentContext, std::string filename, vec2sq<floa
 		dimY = 2 * sizeY * 1.0 / context->winData->HEIGHT;
 	}
 	size = vec2sq<float>(dimX, dimY);
-	float vert_coord[20] =
+	ScalingMatrix = glm::mat4(size.x / 2,    0.0f,      0.0f, 0.0f,
+								0.0f,     size.y / 2,   0.0f, 0.0f,
+								0.0f,        0.0f,      1.0f, 0.0f,
+								0.0f,        0.0f,      0.0f, 1.0f);
+	
+	if (if_static)
 	{
-		-dimX / 2, -dimY / 2, 0.0f,     0.0f, 0.0f,
-		-dimX / 2, dimY / 2, 0.0f,      0.0f, 1.0f,
-		dimX / 2, dimY / 2, 0.0f,       1.0f, 1.0f,
-		dimX / 2, -dimY / 2, 0.0f,      1.0f, 0.0f
-	};
-	unsigned int vert_ind[6] =
-	{
-		0, 1, 2,    0, 2, 3
-	};
+		flags.if_static = true;
+		flags.if_display = true;
+		flags.if_called = true;
+		buttonData.callPos = vec2sq<float>(-2.0f, 0.0f);
+		setButtonPos(position);
+		buttonData.if_draw = 1;
+	}
 	buttonData.mask = Mask;
 	buttonData.if_global = 1;
 	buttonData.if_draw = 1;
-	memcpy(buttonData.vertices, vert_coord, 20 * sizeof(float));
-
 	border_scale_vec = glm::vec2(1.0f + border_size / size.x, 1.0f + border_size / size.y);
-	glGenVertexArrays(1, &VAO);
-	glGenBuffers(1, &VBO);
-	glGenBuffers(1, &EBO);
-	glBindVertexArray(VAO);
-	glBindBuffer(GL_ARRAY_BUFFER, VBO);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-	glBufferData(GL_ARRAY_BUFFER, 20 * sizeof(float), vert_coord, GL_STATIC_DRAW);
-	glVertexAttribPointer(0, 3, GL_FLOAT, false, 5 * sizeof(float), 0);
-	glVertexAttribPointer(1, 2, GL_FLOAT, false, 5 * sizeof(float), (void*)(3 * sizeof(float)));
-	glEnableVertexAttribArray(0);
-	glEnableVertexAttribArray(1);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, 6 * sizeof(unsigned int), vert_ind, GL_STATIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	glBindVertexArray(0);
 
 	index_in_array = context->Buttons.size();
 	context->Buttons.push_back(this);
@@ -328,15 +334,15 @@ Button::~Button()
 	context->Buttons.erase(context->Buttons.begin() + index_in_array);
 	for (int i = index_in_array; i < context->Buttons.size(); i++)
 		context->Buttons[i]->index_in_array = i;
-	glDeleteVertexArrays(1, &VAO);
-	glDeleteBuffers(1, &VBO);
-	glDeleteBuffers(1, &EBO);
 	glDeleteTextures(1, &texture);
 	if (context->Buttons.size() == 0)
 	{
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, context->globalButtonSSBO);
 		glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 		glDeleteBuffers(1, &context->globalButtonSSBO);
+		glDeleteBuffers(1, &context->indivButtonVBO);
+		glDeleteBuffers(1, &context->indivButtonEBO);
+		glDeleteVertexArrays(1, &context->indivButtonVAO);
 	}
 	
 }
@@ -372,7 +378,7 @@ void Button::drawButtonIndiv()
 	glStencilFunc(GL_ALWAYS, 1, 0xFF);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 	glStencilMask(0xFF);
-	glBindVertexArray(VAO);
+	glBindVertexArray(context->indivButtonVAO);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	ContextManager::indivButtonShader->use();
@@ -509,7 +515,7 @@ bool Button::state()
 void Button::setButtonPos(vec2sq<float> Position_NDC)
 {
 	buttonPos = Position_NDC;
-	buttonData.transform = glm::translate(glm::mat4(1.0f), glm::vec3(glm::vec2(buttonPos), 0.0f));
+	buttonData.transform = glm::translate(glm::mat4(1.0f), glm::vec3(glm::vec2(buttonPos), 0.0f)) * ScalingMatrix;
 	flags.if_was_changed = 1;
 }
 

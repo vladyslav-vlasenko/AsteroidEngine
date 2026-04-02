@@ -103,7 +103,7 @@ int main()
 	glBindVertexArray(0);
 	float prevTime = glfwGetTime();
 
-	
+	std::cout << pace_button.size.y << std::endl;
 	while (!glfwWindowShouldClose(window))
 	{
 		delta_time = glfwGetTime() - prevTime;
@@ -123,7 +123,7 @@ int main()
 		glBindVertexArray(0);
 		
 		block1.blockCall();
-	
+		
 		slider.sliderCall();
 		
 

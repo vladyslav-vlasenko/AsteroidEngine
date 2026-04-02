@@ -94,7 +94,6 @@ public:
 
 struct BUTTON_SSBO
 {
-	float vertices[20];
 	glm::mat4 transform; 
 	glm::vec2 callPos;
 	int mask;
@@ -227,6 +226,7 @@ public:
 	//globalButtonVAO - vertex array object to set instructions for button instancing
 	//globalButtonSSBO - shader storage buffer object for storing button info needed for rendering
 	unsigned int globalButtonVAO = 0, globalButtonSSBO = 0;
+	unsigned int indivButtonVAO = 0, indivButtonVBO = 0, indivButtonEBO = 0;
 	std::vector<Button*> Buttons;
 	std::vector<BUTTON_SSBO> Buttons_SSBO_storage;
 	std::vector<Slider*> Sliders;
@@ -241,11 +241,11 @@ class Button
 {
 private:
 	
-	unsigned int VAO, VBO, EBO, texture;
+	unsigned int texture;
 	float border_size = 0.02f;
 	glm::vec2 border_scale_vec;
 	int index_in_array;
-	
+	glm::mat4 ScalingMatrix; //to scale in respond to button size
 	static void* SSBO_map_ptr;
 	void setButtonUtilities();
 

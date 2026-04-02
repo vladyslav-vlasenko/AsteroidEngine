@@ -14,9 +14,6 @@
 #include "Shader.h"
 #include "Interface.h"
 
-#define A ASSETS_PATH
-#define S SHADERS_PATH
-#define F FONTS_PATH
 
 #define PI 3.14
 #define PROC_LAUNCHED 1
