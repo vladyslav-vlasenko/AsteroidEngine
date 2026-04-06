@@ -14,7 +14,7 @@ struct add_object_struct
 void add_object_func(Button*, void* args)
 {
 	add_object_struct* casted_args = (add_object_struct*)args;
-	windowData* winData = (windowData*)glfwGetWindowUserPointer(casted_args->window);
+	contextData* winData = (contextData*)glfwGetWindowUserPointer(casted_args->window);
 	Shader* indiv_shader = casted_args->indivShader;
 	vec2sq<float> callPos_modified = vec2sq<float>(casted_args->block->targetPos.x, (winData->HEIGHT * 1.0f / winData->WIDTH) * casted_args->block->targetPos.y);
 	Body* new_obj = new Body(casted_args->window, A "Bodies/earth.png", indiv_shader, Proc_Time::PROG_EXEC, callPos_modified, { 0.0f, 0.4f }, 0.04f, (objects.size() + 1) * 10);
@@ -33,8 +33,8 @@ bool slider_appear_condition(Slider* slider, void* args)
 	Button* pace_button = (Button*)args;
 	if (pace_button->state() == true)
 	{
-		slider->setCallPos(vec2sq<float>(0.2f, 0.9f));
 		std::cout << "PACE" << std::endl;
+		slider->setCallPos(vec2sq<float>(0.2f, 0.9f));
 		return true;
 	}
 	return false;

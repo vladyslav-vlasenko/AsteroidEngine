@@ -13,11 +13,12 @@
 #include<string>
 #include "Shader.h"
 #include "Interface.h"
-
-
 #define PI 3.14
 #define PROC_LAUNCHED 1
 #define PROC_COMPLETED (1<<1)
+
+
+
 //MAX AMOUNT OF OBJECTS 50
 const float k = 0.1f; //gravitational constant
 const float dt = 0.00005f; //delta time between handling frames
@@ -26,6 +27,7 @@ float traj_interval = 0.04f; //interval between points marking trajectory
 extern float delta_time;
 class Body;
 std::vector<Body*> objects;
+
 enum class Proc_Time
 {
 	PROG_LAUNCH, //when program only launches 
@@ -91,7 +93,7 @@ private:
 		if (FBO == 0)
 		{
 			win = window;
-			winData = (windowData*)glfwGetWindowUserPointer(window);
+			winData = (contextData*)glfwGetWindowUserPointer(window);
 			glGenTextures(1, &texColor);
 			glBindTexture(GL_TEXTURE_2D, texColor);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -292,7 +294,7 @@ public:
 	SSBO_data objData;
 	inline static unsigned int FBO = 0;
 	inline static GLFWwindow* win = 0;
-	inline static windowData* winData = 0;
+	inline static contextData* winData = 0;
 	inline static unsigned int texColor = 0;
 	inline static unsigned int texMask = 0;
 	inline static unsigned int renderBuffer = 0;

@@ -10,26 +10,71 @@ std::vector<ContextManager*> Contexts;
 std::map<unsigned char, Character> Characters;
 unsigned int CharacterAtlasTex = 0;
 vec2sq<unsigned int> CharacterAtlasSize(0, 0);
-std::pair<unsigned char, bool> input_symbol; //composed of actial symbol, that is inputed and bool to handle keyboard button press 
-std::pair<unsigned char, bool> special_symbol; //intended for special symbols like backspace, right/left arrows, etc.
 
-void mousemove_callback(GLFWwindow* window, double xpos, double ypos)
+void default_cursorposition_callback(GLFWwindow* window, double Xpos, double Ypos)
 {
-	static double prevX = xpos;
-	static double prevY = ypos;
-	double xoffset = xpos - prevX;
-	double yoffset = prevY - ypos;
-	windowData* winData = (windowData*)glfwGetWindowUserPointer(window);
-	winData->mouse_pos_change = vec2sq<double>(xoffset, yoffset);
+	static double prevXpos = Xpos;
+	static double prevYpos = Ypos;
+	contextData* contextInfo = (contextData*)glfwGetWindowUserPointer(window);
+	contextInfo->mouse_pos_change.x = Xpos - prevXpos;
+	contextInfo->mouse_pos_change.y = prevYpos - Ypos;
 }
 
-void mousebuttonclick_callback(GLFWwindow* window, int button, int action, int mods)
+void default_mousebutton_callback(GLFWwindow* window, int button, int action, int mods)
 {
-	windowData* winData = (windowData*)glfwGetWindowUserPointer(window);
+	contextData* contextInfo = (contextData*)glfwGetWindowUserPointer(window);
+	
 	if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS)
-		winData->mouse_pressed = true;
-	if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
-		winData->mouse_pressed = false;
+	{
+		contextInfo->mouse_pressed = true;
+	}
+	else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
+	{
+		contextInfo->mouse_pressed = false;
+	}
+}
+
+void default_keybutton_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+	contextData* winData = (contextData*)glfwGetWindowUserPointer(window);
+	if (key != GLFW_KEY_BACKSPACE)
+	{
+		if (action == GLFW_PRESS || action == GLFW_REPEAT)
+		{
+			winData->input_symbol.second = true;
+		}
+		else if (action == GLFW_RELEASE)
+		{
+			winData->input_symbol.second = false;
+		}
+	}
+	else
+	{
+		switch (key)
+		{
+		case GLFW_KEY_BACKSPACE:
+		{
+			if (action == GLFW_PRESS || action == GLFW_REPEAT)
+			{
+				winData->special_symbol.first |= TEXT_BACKSPACE;
+				winData->special_symbol.second = true;
+			}
+			else
+			{
+				winData->special_symbol.first &= ~TEXT_BACKSPACE;
+				winData->special_symbol.second = false;
+			}
+			break;
+		}
+
+		}
+	}
+}
+
+void default_char_callback(GLFWwindow* window, unsigned int codepoint)
+{
+	contextData* winData = (contextData*)glfwGetWindowUserPointer(window);
+	winData->input_symbol.first = (unsigned char)codepoint;
 }
 
 void load_cursor_image(std::string filename, unsigned char*& data, int& width, int& height)
@@ -93,6 +138,9 @@ void generateTexture(unsigned int& texture, unsigned char* data, int& width, int
 /***********************************************************************/
 /***********************************************************************/
 
+FT_Library ContextManager::ft = nullptr;
+FT_Face ContextManager::ft_face = nullptr;
+unsigned int ContextManager::CharacterSSBO = 0;
 
 
 Shader* ContextManager::globalButtonShader = nullptr;
@@ -121,7 +169,7 @@ void ContextManager::CreateUtilities()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, winData->WIDTH, winData->HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, contextInfo.WIDTH, contextInfo.HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
 	glGenTextures(1, &globalTexMask);
 	glBindTexture(GL_TEXTURE_2D, globalTexMask);
@@ -129,11 +177,11 @@ void ContextManager::CreateUtilities()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32I, winData->WIDTH, winData->HEIGHT, 0, GL_RED_INTEGER, GL_INT, nullptr);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32I, contextInfo.WIDTH, contextInfo.HEIGHT, 0, GL_RED_INTEGER, GL_INT, nullptr);
 
 	glGenRenderbuffers(1, &globalRenderBuffer);
 	glBindRenderbuffer(GL_RENDERBUFFER, globalRenderBuffer);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, winData->WIDTH, winData->HEIGHT);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, contextInfo.WIDTH, contextInfo.HEIGHT);
 
 	glGenFramebuffers(1, &globalFBO);
 	glBindFramebuffer(GL_FRAMEBUFFER, globalFBO);
@@ -151,11 +199,107 @@ void ContextManager::CreateUtilities()
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-ContextManager::ContextManager(GLFWwindow* window) : 
+void ContextManager::LoadFonts()
+{
+	if (ft == 0)
+	{
+		if (FT_Init_FreeType(&ft))
+		{
+			std::cout << "ERROR::CAN'T_INITIALIZE_FT_LIB" << std::endl;
+			return;
+		}
+		if (FT_New_Face(ft, F "arial.ttf", 0, &ft_face))
+		{
+			std::cout << "ERROR::FAILED_TO_LOAD_FONT" << std::endl;
+			return;
+		}
+		if (CharacterAtlasTex == 0)
+		{
+			glGenTextures(1, &CharacterAtlasTex);
+			glBindTexture(GL_TEXTURE_2D, CharacterAtlasTex);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		}
+		if (CharacterSSBO == 0)
+		{
+			glGenBuffers(1, &CharacterSSBO);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, CharacterSSBO);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, CharacterSSBO);
+			glBufferData(GL_SHADER_STORAGE_BUFFER, 256 * sizeof(Character_For_SSBO), nullptr, GL_STATIC_DRAW);
+		}
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+		FT_Set_Pixel_Sizes(ft_face, 0, 48);
+		unsigned int lineH = (ft_face->size->metrics.height >> 6);
+		unsigned int AtlasWidth = 0;
+		unsigned int AtlasHeight = 16 * lineH;
+		for (unsigned int i = 0; i < 256; i += 16)
+		{
+			unsigned int row_width = 0;
+			for (unsigned int j = i; j < i + 16; j++)
+			{
+				if (FT_Load_Char(ft_face, j, FT_LOAD_DEFAULT))
+				{
+					std::cout << "ERROR::DIDN'T_MANAGE_TO_LOAD_CHARACTER" << std::endl;
+					return;
+				}
+				row_width += ft_face->glyph->metrics.horiAdvance >> 6;
+			}
+			AtlasWidth = max(row_width, AtlasWidth);
+		}
+		CharacterAtlasSize.x = AtlasWidth;
+		CharacterAtlasSize.y = AtlasHeight;
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, CharacterAtlasSize.x, CharacterAtlasSize.y, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+		int cur_y = 0;
+		Character_For_SSBO AtlasData[256];
+		for (unsigned int i = 0; i < 256; i += 16)
+		{
+			int cur_x = 0;
+			for (unsigned int j = i; j < i + 16; j++)
+			{
+
+				if (FT_Load_Char(ft_face, j, FT_LOAD_RENDER))
+				{
+					std::cout << "ERROR::DIDN'T_MANAGE_TO_LOAD_CHARACTER" << std::endl;
+					return;
+				}
+				unsigned int ch_w = ft_face->glyph->bitmap.width;
+				unsigned int ch_h = ft_face->glyph->bitmap.rows;
+				Character ch;
+				ch.Bearing = glm::ivec2(ft_face->glyph->bitmap_left, ft_face->glyph->bitmap_top);
+				ch.Size = glm::ivec2(ch_w, ch_h);
+				ch.Advance = ft_face->glyph->metrics.horiAdvance >> 6;
+				Characters.insert(std::pair<char, Character>(j, ch));
+				Character_For_SSBO ch_ssbo;
+				ch_ssbo.lu_uv = glm::vec2(cur_x * 1.0f / CharacterAtlasSize.x, (cur_y) * 1.0f / CharacterAtlasSize.y);
+				ch_ssbo.lu_st = glm::vec2(0.0f, 0.0f);
+				ch_ssbo.rl_uv = glm::vec2((cur_x + ch_w) * 1.0f / CharacterAtlasSize.x, (cur_y + ch_h) * 1.0f / CharacterAtlasSize.y);
+				ch_ssbo.rl_st = glm::vec2((float)ch_w, -(float)ch_h);
+				AtlasData[j] = ch_ssbo;
+				glTexSubImage2D(GL_TEXTURE_2D, 0, cur_x, cur_y, ft_face->glyph->bitmap.width, ft_face->glyph->bitmap.rows,
+					GL_RED, GL_UNSIGNED_BYTE, ft_face->glyph->bitmap.buffer);
+				cur_x += ch.Advance + 2;
+			}
+			cur_y += lineH;
+		}
+		glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 256 * sizeof(Character_For_SSBO), AtlasData);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+		std::cout << "LOADING FONTS" << std::endl;
+	}
+
+}
+
+ContextManager::ContextManager(GLFWwindow* window, int WinWIDTH, int WinHEIGHT) : 
 	win(window)
 {
 	
-	winData = (windowData*)glfwGetWindowUserPointer(window);
+	contextInfo.WIDTH = WinWIDTH;
+	contextInfo.HEIGHT = WinHEIGHT;
+	contextInfo.mouse_pressed = false;
+	contextInfo.mouse_pos_change = vec2sq<double>(0.0f, 0.0f);
 	CreateUtilities();
 	Contexts.push_back(this);
 	if (globalButtonShader == nullptr && indivButtonShader == nullptr && textInputShader == nullptr && cursorInputShader == nullptr && sliderShader == nullptr)
@@ -166,7 +310,6 @@ ContextManager::ContextManager(GLFWwindow* window) :
 		cursorInputShader = new Shader(S "text_cursor_vertex_shader.vs", S "text_cursor_fragment_shader.fs");
 		sliderShader = new Shader(S "slider_vertex_shader.vs", S "slider_fragment_shader.fs");
 	}
-	
 }
 
 ContextManager::~ContextManager()
@@ -184,6 +327,18 @@ ContextManager::~ContextManager()
 		}
 			
 	}
+	for (int i = 0; i < InputFields.size(); i++)
+	{
+		releaseInputField(InputFields[i]);
+	}
+	for (int i = 0; i < Sliders.size(); i++)
+	{
+		releaseSlider(Sliders[i]);
+	}
+	for (int i = 0; i < Buttons.size(); i++)
+	{
+		releaseButton(Buttons[i]);
+	}
 	if (Contexts.size() == 0)
 	{
 		delete globalButtonShader;
@@ -200,12 +355,12 @@ ContextManager::~ContextManager()
 
 }
 
-ContextManager* ContextManager::InitContext(GLFWwindow* window)
+ContextManager* ContextManager::InitContext(GLFWwindow* window, int WinWIDTH, int WinHEIGHT)
 {
 	if (CheckIfFirst(window))
 	{
 
-		return new ContextManager(window);
+		return new ContextManager(window, WinWIDTH, WinHEIGHT);
 	}
 	else
 	{
@@ -218,6 +373,88 @@ void ContextManager::ReleaseContext(ContextManager* context)
 {
 	if (context)
 		delete context;
+}
+
+Button* ContextManager::createStaticButton(std::string filename, vec2sq<float> position, float sizeX, float sizeY, int Mask, void (*buttonCallback)(Button* button, void* args), void* args)
+{
+	return new Button(this, filename, position, sizeX, sizeY, Mask, true, buttonCallback, args);
+}
+
+void ContextManager::releaseButton(Button*& button)
+{
+	if (button)
+	{
+		delete button;
+		button = nullptr;
+	}
+}
+
+ButtonBlock* ContextManager::createDynamicButtonBlock(std::vector<std::string>& filenames, std::vector<int>& Masks,
+	void (*CallFunctionCallback)(ButtonBlock*, void* args), void (*HideFunctionCallback)(ButtonBlock* block, void* args),
+	void (*DisplayingFunctionCallback)(ButtonBlock*, void* args), std::vector<void (*)(Button*, void*)> ButtonsFunction, std::vector<void*>& buttons_function_args,
+	void* call_args = NULL, void* hide_args = NULL, void* display_args = NULL)
+{
+	return new ButtonBlock(this, filenames, Masks, CallFunctionCallback, HideFunctionCallback, DisplayingFunctionCallback, ButtonsFunction, buttons_function_args, call_args, hide_args, display_args);
+}
+
+void ContextManager::releaseButtonBlock(ButtonBlock*& button_block)
+{
+	if (button_block)
+	{
+		delete button_block;
+		button_block = nullptr;
+	}
+}
+
+Slider* ContextManager::createDynamicSlider(std::string sliderFrame_img, std::string sliderPoint_img, vec2sq<float> sliderPos, int Mask, void (*SliderCallback)(Button* slider, void* args), void (*SliderAppear)(Slider* slider, void* args),
+	void (*SliderDisplay)(Slider* slider, void* args), void (*SliderHide)(Slider* slider, void* args), void* SliderCallback_args = NULL,
+	void* SliderAppear_args = NULL, void* SliderDisplay_args = NULL, void* SliderHide_args = NULL)
+{
+	return new Slider(this, sliderFrame_img, sliderPoint_img, sliderPos, Mask, false, SliderCallback, SliderAppear, SliderDisplay, SliderHide, SliderCallback_args, SliderAppear_args,
+		SliderDisplay_args, SliderHide_args);
+}
+
+void ContextManager::releaseSlider(Slider*& slider)
+{
+	if (slider)
+	{
+		delete slider;
+		slider = nullptr;
+	}
+}
+
+InputField* ContextManager::createDynamicInputField(std::string line_filename,
+	float text_size, vec2sq<float> position, float sizeX, float sizeY, int Mask, void (*InputFieldAppearFunc)(InputField*, void*),
+	void (*InputFieldHideFunc)(InputField*, void*), void (*InputFieldDisplayFunc)(InputField*, void*), void* InputFieldAppear_args,
+	void* InputFieldHide_args, void* InputFieldDisplay_args)
+{
+	LoadFonts();
+	return new InputField(this, line_filename, text_size, position, sizeX, sizeY, Mask, false, InputFieldAppearFunc, InputFieldHideFunc, InputFieldDisplayFunc, InputFieldAppear_args,
+		InputFieldHide_args, InputFieldDisplay_args);
+}
+
+void ContextManager::releaseInputField(InputField*& input)
+{
+	if (input)
+	{
+		delete input;
+		input = nullptr;
+	}
+
+}
+
+contextData* ContextManager::getContextDataPointer()
+{
+	return &contextInfo;
+}
+
+void ContextManager::setDefaultWindowCallbacks()
+{
+	glfwSetWindowUserPointer(win, &contextInfo);
+	glfwSetCursorPosCallback(win, default_cursorposition_callback);
+	glfwSetMouseButtonCallback(win, default_mousebutton_callback);
+	glfwSetKeyCallback(win, default_keybutton_callback);
+	glfwSetCharCallback(win, default_char_callback);
 }
 //For Button Class
 /***********************************************************************/
@@ -288,13 +525,13 @@ Button::Button(ContextManager* currentContext, std::string filename, vec2sq<floa
 	float dimX, dimY;
 	if (sizeX == 0 && sizeY == 0)
 	{
-		dimX = 2 * width * 1.0 / context->winData->WIDTH;
-		dimY = 2 * height * 1.0 / context->winData->HEIGHT;
+		dimX = 2 * width * 1.0 / context->contextInfo.WIDTH;
+		dimY = 2 * height * 1.0 / context->contextInfo.HEIGHT;
 	}
 	else
 	{
-		dimX = 2 * sizeX * 1.0 / context->winData->WIDTH;
-		dimY = 2 * sizeY * 1.0 / context->winData->HEIGHT;
+		dimX = 2 * sizeX * 1.0 / context->contextInfo.WIDTH;
+		dimY = 2 * sizeY * 1.0 / context->contextInfo.HEIGHT;
 	}
 	size = vec2sq<float>(dimX, dimY);
 	ScalingMatrix = glm::mat4(size.x / 2,    0.0f,      0.0f, 0.0f,
@@ -446,11 +683,11 @@ void Button::checkIfButtonClicked()
 	}
 	if (flags.if_called == 1)
 	{
-		if (context->winData->mouse_pressed == 1)
+		if (context->contextInfo.mouse_pressed == true)
 		{
 			flags.if_checked = 1;
 		}
-		if ((flags.if_hovered == 1 && context->winData->mouse_pressed == 1) && flags.if_waits_to_be_pressed == 0)
+		if ((flags.if_hovered == 1 && context->contextInfo.mouse_pressed == true) && flags.if_waits_to_be_pressed == 0)
 		{
 			flags.if_waits_to_be_pressed = 1;
 			flags.if_just_pressed = 1;
@@ -461,7 +698,7 @@ void Button::checkIfButtonClicked()
 			flags.if_just_pressed = 0;
 		}
 
-		else if ((context->winData->mouse_pressed == 0 && flags.if_hovered == 1) && flags.if_waits_to_be_pressed == 1)
+		else if ((context->contextInfo.mouse_pressed == false && flags.if_hovered == 1) && flags.if_waits_to_be_pressed == 1)
 		{
 			flags.if_waits_to_be_pressed = 0;
 			flags.if_pressed = 1;
@@ -525,8 +762,8 @@ void Button::setButtonCallPos(vec2sq<float> Call_Position, GCDenum coordFormat)
 	{
 		case GCDenum::GCD_NDC:
 		{
-			buttonData.callPos.x = context->winData->WIDTH * (Call_Position.x + 1) / 2;
-			buttonData.callPos.y = context->winData->HEIGHT * (1 + Call_Position.y) / 2;
+			buttonData.callPos.x = context->contextInfo.WIDTH * (Call_Position.x + 1) / 2;
+			buttonData.callPos.y = context->contextInfo.HEIGHT * (1 + Call_Position.y) / 2;
 			flags.if_was_changed = 1;
 			break;
 		}
@@ -575,13 +812,13 @@ void displayButtons(ContextManager* context, Shader& interfaceShader, unsigned i
 
 int Button::GetMouseMask(ContextManager* context)
 {
-	if (context->winData->mouse_pos_change.x != 0 && context->winData->mouse_pos_change.y != 0)
+	if (context->contextInfo.mouse_pos_change.x != 0 && context->contextInfo.mouse_pos_change.y != 0)
 	{
 		double mouseX, mouseY;
 		glfwGetCursorPos(context->win, &mouseX, &mouseY);
 		glReadBuffer(GL_COLOR_ATTACHMENT1);
 		int mask;
-		glReadPixels(mouseX, context->winData->HEIGHT - mouseY, 1, 1, GL_RED_INTEGER, GL_INT, &mask);
+		glReadPixels(mouseX, context->contextInfo.HEIGHT - mouseY, 1, 1, GL_RED_INTEGER, GL_INT, &mask);
 		return mask;
 	}
 	return -1;
@@ -693,7 +930,7 @@ void Slider::slider_func()
 	{
 		double mouseX, mouseY;
 		glfwGetCursorPos(context->win, &mouseX, &mouseY);
-		float mouseX_norm = (2 * mouseX - context->winData->WIDTH) * 1.0f / context->winData->WIDTH;
+		float mouseX_norm = (2 * mouseX - context->contextInfo.WIDTH) * 1.0f / context->contextInfo.WIDTH;
 		check_slider_pos(mouseX_norm);
 		count_result();
 	}
@@ -702,7 +939,7 @@ void Slider::slider_func()
 
 void Slider::check_slider_pos(float mouseX_norm)
 {
-	if (mouseX_norm > (framePosition + 0.5 * (frameSize - size)).x && context->winData->mouse_pos_change != vec2sq<double>(0.0, 0.0))
+	if (mouseX_norm > (framePosition + 0.5 * (frameSize - size)).x && context->contextInfo.mouse_pos_change != vec2sq<double>(0.0, 0.0))
 		setButtonPos(vec2sq<float>((framePosition + 0.5 * (frameSize - size)).x, buttonPos.y));
 	else if (mouseX_norm < (framePosition + (-0.5) * (frameSize - size)).x)
 		setButtonPos(vec2sq<float>((framePosition - 0.5 * (frameSize - size)).x, buttonPos.y));
@@ -719,14 +956,15 @@ Slider::Slider(ContextManager* currentContext, std::string sliderFrame_img, std:
 {
 	slider_value = 0.5f;
 	flags.if_in_slider = 1;
+	sliderFlags = 0;
 	unsigned char* frameImgData;
 	int frameImgWidth, frameImgHeight;
 	GLenum frameImgFormat;
 	load_image(sliderFrame_img, frameImgData, frameImgWidth, frameImgHeight, frameImgFormat);
 	generateTexture(frameTex, frameImgData, frameImgWidth, frameImgHeight, frameImgFormat);
 	stbi_image_free(frameImgData);
-	float sizeX_norm = 2 * frameImgWidth * 1.0f / context->winData->WIDTH;
-	float sizeY_norm = 2 * frameImgHeight * 1.0f / context->winData->HEIGHT;
+	float sizeX_norm = 2 * frameImgWidth * 1.0f / context->contextInfo.WIDTH;
+	float sizeY_norm = 2 * frameImgHeight * 1.0f / context->contextInfo.HEIGHT;
 	frameSize.x = sizeX_norm;
 	frameSize.y = sizeY_norm;
 	frame_border_scale_vec = glm::vec2(1.0f + frame_border_size / frameSize.x, 1.0f + frame_border_size / frameSize.y);
@@ -772,7 +1010,13 @@ Slider::~Slider()
 	glDeleteBuffers(1, &frameVBO);
 	glDeleteBuffers(1, &frameEBO);
 	glDeleteTextures(1, &frameTex);
-
+	for (int i = 0; i < context->Sliders.size(); i++)
+	{
+		if (context->Sliders[i] == this)
+		{
+			context->Sliders.erase(context->Sliders.begin() + i);
+		}
+	}
 }
 
 void Slider::setCallPos(vec2sq<float> CallPos)
@@ -794,7 +1038,7 @@ void Slider::drawSliderFrameInFBO()
 	ContextManager::sliderShader->SetInt("type", 0);
 	ContextManager::sliderShader->SetInt("Tex", 0);
 	ContextManager::sliderShader->SetInt("Mask", 18);
-	float callPos_y = (context->winData->HEIGHT * 1.0f / 2) * (1 + callPos.y);
+	float callPos_y = (context->contextInfo.HEIGHT * 1.0f / 2) * (1 + callPos.y);
 	ContextManager::sliderShader->SetFloat("callPos_y", callPos_y);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 	glStencilFunc(GL_NOTEQUAL, 2, 0xFF);
@@ -833,6 +1077,7 @@ void Slider::sliderCall()
 	
 	if (appear_func != NULL && display_func != NULL && hide_func != NULL)
 	{
+		
 		appear_func(this, appear_args);
 		display_func(this, display_args);
 		hide_func(this, hide_args);
@@ -886,8 +1131,8 @@ void standardCallBacksForBlocks::RightMouseButtonCall(ButtonBlock* block, void*)
 		block->flags |= BUTTONBLOCK_RIGHT_M_BUT_FROM_THE_BEGIN;
 		double posX, posY;
 		glfwGetCursorPos(context->win, &posX, &posY);
-		block->callPos.x = (2 * posX - context->winData->WIDTH) * 1.0f / context->winData->WIDTH;
-		block->callPos.y = (-2 * posY + context->winData->HEIGHT) * 1.0f / context->winData->HEIGHT;
+		block->callPos.x = (2 * posX - context->contextInfo.WIDTH) * 1.0f / context->contextInfo.WIDTH;
+		block->callPos.y = (-2 * posY + context->contextInfo.HEIGHT) * 1.0f / context->contextInfo.HEIGHT;
 		block->targetPos = block->callPos;
 		if (block->callPos.x < -0.99f) block->callPos.x = -0.99f;
 		else if (block->callPos.x + block->blockSize.x > 0.99f) block->callPos.x = 0.99f - block->blockSize.x;
@@ -897,7 +1142,7 @@ void standardCallBacksForBlocks::RightMouseButtonCall(ButtonBlock* block, void*)
 		{
 			block->buttons[i]->CallButton(true);
 			double callPosX_SC = posX;
-			double callPosY_SC = context->winData->HEIGHT - posY;
+			double callPosY_SC = context->contextInfo.HEIGHT - posY;
 			block->buttons[i]->setButtonCallPos(vec2sq<float>(callPosX_SC, callPosY_SC), GCDenum::GCD_SC);
 		}
 		
@@ -1030,105 +1275,8 @@ void standardCallBacksForBlocks::VerticalDisplay(ButtonBlock * block, void* args
 /***********************************************************************/
 
 
-FT_Library InputField::ft = nullptr;
-FT_Face InputField::ft_face = nullptr;
-unsigned int InputField::CharacterSSBO = 0;
 unsigned int InputField::amount = 0;
 glm::vec2 InputField::scale = glm::vec2(0.0f);
-
-void InputField::CreateFontsAtlas(ContextManager* context)
-{
-	if (ft == 0)
-	{	
-		glfwSetKeyCallback(context->win, key_callback);
-		glfwSetCharCallback(context->win, char_callback);
-		if (FT_Init_FreeType(&ft))
-		{
-			std::cout << "ERROR::CAN'T_INITIALIZE_FT_LIB" << std::endl;
-			return;
-		}
-		if (FT_New_Face(ft, F "arial.ttf", 0, &ft_face))
-		{
-			std::cout << "ERROR::FAILED_TO_LOAD_FONT" << std::endl;
-			return;
-		}
-		if (CharacterAtlasTex == 0)
-		{
-			glGenTextures(1, &CharacterAtlasTex);
-			glBindTexture(GL_TEXTURE_2D, CharacterAtlasTex);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		}
-		if (CharacterSSBO == 0)
-		{
-			glGenBuffers(1, &CharacterSSBO);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, CharacterSSBO);
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, CharacterSSBO);
-			glBufferData(GL_SHADER_STORAGE_BUFFER, 256 * sizeof(Character_For_SSBO), nullptr, GL_STATIC_DRAW);
-		}
-		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-		FT_Set_Pixel_Sizes(ft_face, 0, 48);
-		unsigned int lineH = (ft_face->size->metrics.height >> 6);
-		unsigned int AtlasWidth = 0;
-		unsigned int AtlasHeight = 16 * lineH;
-		for (unsigned int i = 0; i < 256; i+=16)
-		{
-			unsigned int row_width = 0;
-			for (unsigned int j = i; j < i + 16; j++)
-			{
-				if (FT_Load_Char(ft_face, j, FT_LOAD_DEFAULT))
-				{
-					std::cout << "ERROR::DIDN'T_MANAGE_TO_LOAD_CHARACTER" << std::endl;
-					return;
-				}
-				row_width += ft_face->glyph->metrics.horiAdvance >> 6;
-			}
-			AtlasWidth = max(row_width, AtlasWidth);
-		}
-		CharacterAtlasSize.x = AtlasWidth;
-		CharacterAtlasSize.y = AtlasHeight;
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, CharacterAtlasSize.x, CharacterAtlasSize.y, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
-		int cur_y = 0;
-		Character_For_SSBO AtlasData[256];
-		for (unsigned int i = 0; i < 256; i += 16)
-		{
-			int cur_x = 0;
-			for (unsigned int j = i; j < i + 16; j++)
-			{
-				
-				if (FT_Load_Char(ft_face, j, FT_LOAD_RENDER))
-				{
-					std::cout << "ERROR::DIDN'T_MANAGE_TO_LOAD_CHARACTER" << std::endl;
-					return;
-				}
-				unsigned int ch_w = ft_face->glyph->bitmap.width;
-				unsigned int ch_h = ft_face->glyph->bitmap.rows;
-				Character ch;
-				ch.Bearing = glm::ivec2(ft_face->glyph->bitmap_left, ft_face->glyph->bitmap_top);
-				ch.Size = glm::ivec2(ch_w, ch_h);
-				ch.Advance = ft_face->glyph->metrics.horiAdvance >> 6;
-				Characters.insert(std::pair<char, Character>(j, ch));
-				Character_For_SSBO ch_ssbo;
-				ch_ssbo.lu_uv = glm::vec2(cur_x * 1.0f / CharacterAtlasSize.x, (cur_y) * 1.0f / CharacterAtlasSize.y);
-				ch_ssbo.lu_st = glm::vec2(0.0f, 0.0f);
-				ch_ssbo.rl_uv = glm::vec2((cur_x + ch_w) * 1.0f / CharacterAtlasSize.x, (cur_y + ch_h) * 1.0f / CharacterAtlasSize.y);
-				ch_ssbo.rl_st = glm::vec2((float)ch_w, -(float)ch_h);
-				AtlasData[j] = ch_ssbo;
-				glTexSubImage2D(GL_TEXTURE_2D, 0, cur_x, cur_y, ft_face->glyph->bitmap.width, ft_face->glyph->bitmap.rows,
-					GL_RED, GL_UNSIGNED_BYTE, ft_face->glyph->bitmap.buffer);
-				cur_x += ch.Advance+2;
-			}
-			cur_y += lineH;
-		}
-		glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 256 * sizeof(Character_For_SSBO), AtlasData);
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-		glBindTexture(GL_TEXTURE_2D, 0);
-		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-	}
-	
-}
 
 void InputField::renderText()
 {
@@ -1167,15 +1315,15 @@ void InputField::drawCursor()
 
 void InputField::updateUBO()
 {
-	scale = glm::vec2(2.0f / context->winData->WIDTH, 2.0f / context->winData->HEIGHT);
+	scale = glm::vec2(2.0f / context->contextInfo.WIDTH, 2.0f / context->contextInfo.HEIGHT);
 	if (printed_text != intended_text || (inputFlags & INPUT_TEXT_SHIFT) != 0)
 	{
 		inputFlags &= ~INPUT_TEXT_SHIFT;
 		letter_list.assign(128, -1);
 		float virt_cursorPos = strBegin;
 		std::string::const_iterator c;
-		int winWIDTH = context->winData->WIDTH;
-		int winHEIGHT = context->winData->HEIGHT;
+		int winWIDTH = context->contextInfo.WIDTH;
+		int winHEIGHT = context->contextInfo.HEIGHT;
 		unsigned int i = 0;
 		for (c = intended_text.begin(); c != intended_text.end(); c++, i++)
 		{
@@ -1205,42 +1353,44 @@ void InputField::updateUBO()
 
 void InputField::inputOperations()
 {
-	if ((inputFlags & INPUT_ACTIVE) != 0 && input_symbol.second == true)
+	
+	if ((inputFlags & INPUT_ACTIVE) != 0 && context->contextInfo.input_symbol.second == true)
 	{
-		char symbol = (char)input_symbol.first;
+		
+		char symbol = context->contextInfo.input_symbol.first;
 		const char inserted[2] = {symbol, '\0'};
 		intended_text.insert(cursorPos_in_text, inserted);
-		input_symbol.second = false;
+		context->contextInfo.input_symbol.second = false;
 		cursorPos_in_text += 1;
-		cursorPos += text_stride_scale_param * 2.0f * (Characters[symbol].Advance) / context->winData->WIDTH;
+		cursorPos += text_stride_scale_param * 2.0f * (Characters[symbol].Advance) / context->contextInfo.WIDTH;
 		cursorTransform = glm::translate(glm::mat4(1.0f), glm::vec3(cursorPos, buttonPos.y, 0.0f));
 	}
 		
-	else if ((inputFlags & INPUT_ACTIVE) != 0 && special_symbol.second == true)
+	else if ((inputFlags & INPUT_ACTIVE) != 0 && context->contextInfo.special_symbol.second == true)
 	{
-		if (special_symbol.first == TEXT_BACKSPACE)
+		if (context->contextInfo.special_symbol.first == TEXT_BACKSPACE)
 		{
 			std::string symbol = intended_text.substr(cursorPos_in_text - 1, 1);
 			intended_text.erase(intended_text.begin() + cursorPos_in_text - 1);
 			cursorPos_in_text -= 1;
-			cursorPos -= text_stride_scale_param * 2.0f * (Characters[(int)(*symbol.begin())].Advance) / context->winData->WIDTH;
-			special_symbol.second = false;
+			cursorPos -= text_stride_scale_param * 2.0f * (Characters[(int)(*symbol.begin())].Advance) / context->contextInfo.WIDTH;
+			context->contextInfo.special_symbol.second = false;
 		}
 
-		else if (special_symbol.first == TEXT_LEFT)
+		else if (context->contextInfo.special_symbol.first == TEXT_LEFT)
 		{
 			std::string symbol = intended_text.substr(cursorPos_in_text - 1, 1);
 			cursorPos_in_text -= 1;
-			cursorPos -= text_stride_scale_param * 2.0f * (Characters[(int)(*symbol.begin())].Advance) / context->winData->WIDTH;
-			special_symbol.second = false;
+			cursorPos -= text_stride_scale_param * 2.0f * (Characters[(int)(*symbol.begin())].Advance) / context->contextInfo.WIDTH;
+			context->contextInfo.special_symbol.second = false;
 		}
 
-		else if (special_symbol.first == TEXT_RIGHT)
+		else if (context->contextInfo.special_symbol.first == TEXT_RIGHT)
 		{
 			std::string symbol = intended_text.substr(cursorPos_in_text, 1);
 			cursorPos_in_text += 1;
-			cursorPos += text_stride_scale_param * 2.0f * (Characters[(int)(*symbol.begin())].Advance) / context->winData->WIDTH;
-			special_symbol.second = false;
+			cursorPos += text_stride_scale_param * 2.0f * (Characters[(int)(*symbol.begin())].Advance) / context->contextInfo.WIDTH;
+			context->contextInfo.special_symbol.second = false;
 		}
 		cursorTransform = glm::translate(glm::mat4(1.0f), glm::vec3(cursorPos, buttonPos.y, 0.0f));
 		
@@ -1253,22 +1403,22 @@ void InputField::manualCursorDesignation()
 	{
 		double mouseX_SC, mouseY_SC;
 		glfwGetCursorPos(context->win, &mouseX_SC, &mouseY_SC);
-		float mouseX_NDC = 2 * mouseX_SC / context->winData->WIDTH - 1;
-		if (mouseX_NDC >= letterPos_list[printed_text.size() - 1].x + text_stride_scale_param * 2.0f * (Characters[letter_list[printed_text.size() - 1]].Advance) / context->winData->WIDTH)
+		float mouseX_NDC = 2 * mouseX_SC / context->contextInfo.WIDTH - 1;
+		if (mouseX_NDC >= letterPos_list[printed_text.size() - 1].x + text_stride_scale_param * 2.0f * (Characters[letter_list[printed_text.size() - 1]].Advance) / context->contextInfo.WIDTH)
 		{
-			cursorPos = letterPos_list[printed_text.size() - 1].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->winData->WIDTH + text_stride_scale_param * 2.0f * (Characters[letter_list[printed_text.size() - 1]].Advance) / context->winData->WIDTH;
+			cursorPos = letterPos_list[printed_text.size() - 1].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->contextInfo.WIDTH + text_stride_scale_param * 2.0f * (Characters[letter_list[printed_text.size() - 1]].Advance) / context->contextInfo.WIDTH;
 			cursorTransform = glm::translate(glm::mat4(1.0f), glm::vec3(cursorPos, buttonPos.y, 0.0f));
 			cursorPos_in_text = printed_text.size();
 		}
 		else if (mouseX_NDC >= letterPos_list[printed_text.size() - 1].x)
 		{
-			cursorPos = letterPos_list[printed_text.size() - 1].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->winData->WIDTH;
+			cursorPos = letterPos_list[printed_text.size() - 1].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->contextInfo.WIDTH;
 			cursorTransform = glm::translate(glm::mat4(1.0f), glm::vec3(cursorPos, buttonPos.y, 0.0f));
 			cursorPos_in_text = printed_text.size() - 1;
 		}
 		else if (mouseX_NDC <= letterPos_list[0].x)
 		{
-			cursorPos = letterPos_list[0].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->winData->WIDTH;
+			cursorPos = letterPos_list[0].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->contextInfo.WIDTH;
 			cursorTransform = glm::translate(glm::mat4(1.0f), glm::vec3(cursorPos, buttonPos.y, 0.0f));
 			cursorPos_in_text = 0;
 		}
@@ -1279,7 +1429,7 @@ void InputField::manualCursorDesignation()
 
 				if (mouseX_NDC >= letterPos_list[i-1].x && mouseX_NDC <= letterPos_list[i].x)
 				{
-					cursorPos = letterPos_list[i-1].x - 2.0f * res_text_size * Characters[letter_list[i-1]].Bearing.x / context->winData->WIDTH;
+					cursorPos = letterPos_list[i-1].x - 2.0f * res_text_size * Characters[letter_list[i-1]].Bearing.x / context->contextInfo.WIDTH;
 					cursorTransform = glm::translate(glm::mat4(1.0f), glm::vec3(cursorPos, buttonPos.y, 0.0f));
 					cursorPos_in_text = i - 1;
 					break;
@@ -1303,21 +1453,21 @@ void InputField::textSelection()
 	{
 		double mouseX_SC, mouseY_SC;
 		glfwGetCursorPos(context->win, &mouseX_SC, &mouseY_SC);
-		float mouseX_NDC = 2 * mouseX_SC / context->winData->WIDTH - 1;
+		float mouseX_NDC = 2 * mouseX_SC / context->contextInfo.WIDTH - 1;
 		int init_virt_cursorPos_in_text = virt_cursorPos_in_text;
-		if (mouseX_NDC >= letterPos_list[printed_text.size() - 1].x + text_stride_scale_param * 2.0f * (Characters[letter_list[printed_text.size() - 1]].Advance) / context->winData->WIDTH)
+		if (mouseX_NDC >= letterPos_list[printed_text.size() - 1].x + text_stride_scale_param * 2.0f * (Characters[letter_list[printed_text.size() - 1]].Advance) / context->contextInfo.WIDTH)
 		{
-			virt_cursorPos = letterPos_list[printed_text.size() - 1].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->winData->WIDTH + text_stride_scale_param * 2.0f * (Characters[letter_list[printed_text.size() - 1]].Advance) / context->winData->WIDTH;
+			virt_cursorPos = letterPos_list[printed_text.size() - 1].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->contextInfo.WIDTH + text_stride_scale_param * 2.0f * (Characters[letter_list[printed_text.size() - 1]].Advance) / context->contextInfo.WIDTH;
 			virt_cursorPos_in_text = printed_text.size();
 		}
 		else if (mouseX_NDC >= letterPos_list[printed_text.size() - 1].x)
 		{
-			virt_cursorPos = letterPos_list[printed_text.size() - 1].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->winData->WIDTH;
+			virt_cursorPos = letterPos_list[printed_text.size() - 1].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->contextInfo.WIDTH;
 			virt_cursorPos_in_text = printed_text.size() - 1;
 		}
 		else if (mouseX_NDC <= letterPos_list[0].x)
 		{
-			virt_cursorPos = letterPos_list[0].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->winData->WIDTH;
+			virt_cursorPos = letterPos_list[0].x - 2.0f * res_text_size * Characters[letter_list[printed_text.size() - 1]].Bearing.x / context->contextInfo.WIDTH;
 			virt_cursorPos_in_text = 0;
 		}
 		else
@@ -1327,7 +1477,7 @@ void InputField::textSelection()
 
 				if (mouseX_NDC >= letterPos_list[i - 1].x && mouseX_NDC <= letterPos_list[i].x)
 				{
-					virt_cursorPos = letterPos_list[i - 1].x - 2.0f * res_text_size * Characters[letter_list[i - 1]].Bearing.x / context->winData->WIDTH;
+					virt_cursorPos = letterPos_list[i - 1].x - 2.0f * res_text_size * Characters[letter_list[i - 1]].Bearing.x / context->contextInfo.WIDTH;
 					virt_cursorPos_in_text = i - 1;
 					break;
 				}
@@ -1363,8 +1513,12 @@ void InputField::drawSelectionRect()
 void InputField::activateInputField()
 {
 	if ((inputFlags & INPUT_ACTIVE) == 0 && flags.if_pressed == 1)
+	{
 		inputFlags |= INPUT_ACTIVE;
-	else if(((inputFlags & INPUT_ACTIVE) != 0 && context->winData->mouse_pressed == true) && flags.if_hovered == 0)
+		std::cout << "ACTIVATED" << std::endl;
+	}
+		
+	else if(((inputFlags & INPUT_ACTIVE) != 0 && context->contextInfo.mouse_pressed == true) && flags.if_hovered == 0)
 		inputFlags &= ~INPUT_ACTIVE;
 }
 
@@ -1372,7 +1526,7 @@ void InputField::transferAllSymbols(vec2sq<float> pos)
 {
 	strBegin = pos.x - size.x / 2 + 0.01f * size.x;
 	strEnd = pos.x + size.x / 2 - 0.01f * size.x;
-	baseline = pos.y - 32 * res_text_size / (context->winData->HEIGHT);
+	baseline = pos.y - 32 * res_text_size / (context->contextInfo.HEIGHT);
 	vec2sq<float> prevPos = letterPos_list[0];
 	letterPos_list[0].x = strBegin;
 	inputFlags |= INPUT_TEXT_SHIFT;
@@ -1387,7 +1541,7 @@ InputField::InputField(ContextManager* currentContext, std::string line_filename
 	: Button(currentContext, line_filename, position, sizeX, sizeY, Mask, if_static, NULL, NULL), appear_func(InputFieldAppearFunc), hide_func(InputFieldHideFunc), display_func(InputFieldDisplayFunc),
 	appear_args(InputFieldAppear_args), hide_args(InputFieldHide_args), display_args(InputFieldDisplay_args)
 {
-	int winHEIGHT = context->winData->HEIGHT;
+	int winHEIGHT = context->contextInfo.HEIGHT;
 	inputFlags = 0;
 	if (if_static)
 	{
@@ -1398,14 +1552,13 @@ InputField::InputField(ContextManager* currentContext, std::string line_filename
 	cursorPos_in_text = intended_text.length();
 	cursor_intensity = 0;
 	if (text_size == 0)
-		res_text_size = 0.8f*size.y * context->winData->HEIGHT / 96; //initial text size 48
+		res_text_size = 0.8f*size.y * context->contextInfo.HEIGHT / 96; //initial text size 48
 	else
 		res_text_size = text_size;
 	text_stride_scale_param = STANDARD_TEXT_STRIDE_SCALE_PARAM * res_text_size;
-	float button_height_SC = size.y * context->winData->HEIGHT / 2;
+	float button_height_SC = size.y * context->contextInfo.HEIGHT / 2;
 	baseline = buttonPos.y -32 * res_text_size / (winHEIGHT);
 	flags.if_in_inputfield = 1;
-	CreateFontsAtlas(context);
 	glGenBuffers(1, &UBO);
 	glBindBuffer(GL_UNIFORM_BUFFER, UBO);
 	glBindBufferBase(GL_UNIFORM_BUFFER, amount, UBO);
@@ -1414,11 +1567,11 @@ InputField::InputField(ContextManager* currentContext, std::string line_filename
 	strEnd = position.x + size.x / 2 - 0.01f * size.x;
 	effectiveFieldHeight = 0.98f * size.y;
 	if (text_size == 0)
-		res_text_size = 0.9f * effectiveFieldHeight * context->winData->HEIGHT / 96; //initial text size 48
+		res_text_size = 0.9f * effectiveFieldHeight * context->contextInfo.HEIGHT / 96; //initial text size 48
 	else
 		res_text_size = text_size;
 	cursorPos = strBegin;
-	cursorWidth = 2.0f / context->winData->WIDTH;
+	cursorWidth = 2.0f / context->contextInfo.WIDTH;
 	letter_list.resize(128);
 	letterPos_list.resize(128);
 	letter_transforms.resize(128);
@@ -1498,69 +1651,6 @@ void InputField::drawAllTexts(ContextManager* currentContext)
 	}
 }
 
-void key_callback(GLFWwindow* window, int key, int, int action, int mods)
-{
-	if (key != GLFW_KEY_BACKSPACE && key != GLFW_KEY_RIGHT && key != GLFW_KEY_LEFT)
-	{
-		if (action == GLFW_PRESS || action == GLFW_REPEAT)
-		{
-			input_symbol.second = true;
-		}
-			
-		else if (action == GLFW_RELEASE)
-		{
-			input_symbol.second = false;
-		}	
-	}
-	
-	if (key == GLFW_KEY_BACKSPACE)
-	{
-		if (action == GLFW_PRESS || action == GLFW_REPEAT)
-		{
-			special_symbol.first |= TEXT_BACKSPACE;
-			special_symbol.second = true;
-		}
-		else if (action == GLFW_RELEASE)
-		{
-			special_symbol.first &= ~TEXT_BACKSPACE;
-			special_symbol.second = false;
-		}
-	}
-	 
-	if (key == GLFW_KEY_LEFT)
-	{
-		if (action == GLFW_PRESS || action == GLFW_REPEAT)
-		{
-			special_symbol.first |= TEXT_LEFT;
-			special_symbol.second = true;
-		}
-		else if (action == GLFW_RELEASE)
-		{
-			special_symbol.first &= ~TEXT_LEFT;
-			special_symbol.second = false;
-		}
-	}
-
-	if (key == GLFW_KEY_RIGHT)
-	{
-		if (action == GLFW_PRESS || action == GLFW_REPEAT)
-		{
-			special_symbol.first |= TEXT_RIGHT;
-			special_symbol.second = true;
-		}
-		else if (action == GLFW_RELEASE)
-		{
-			special_symbol.first &= ~TEXT_RIGHT;
-			special_symbol.second = false;
-		}
-	}
-}
-
-void char_callback(GLFWwindow* window, unsigned int codepoint)
-{
-	input_symbol.first = (unsigned char)codepoint;
-}
-
 
 //For namespace standardCallBacksForSlider
 /***********************************************************************/
@@ -1571,13 +1661,13 @@ void char_callback(GLFWwindow* window, unsigned int codepoint)
 void standardCallBacksForSlider::SliderAppear(Slider* slider, void* args)
 {
 	Condition_struct* casted_args = (Condition_struct*)args;
-
 	if (casted_args->condition_func(slider, casted_args->condition_args) == true && (slider->sliderFlags & SLIDER_CALLED) == 0)
 	{
+		
 		slider->CallButton(true);
 		slider->sliderFlags |= SLIDER_CALLED;
 		slider->sliderFlags |= SLIDER_CALLED_FIRST;
-
+		
 		slider->flags.if_display = 1;
 
 	}

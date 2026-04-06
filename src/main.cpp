@@ -36,6 +36,8 @@ int main()
 		return -1;
 	}
 	 //all objects in the system
+	ContextManager* context = ContextManager::InitContext(window, WIDTH, HEIGHT);
+	context->setDefaultWindowCallbacks();
 
 	unsigned char* cursor_data;
 	int cur_width, cur_height;
@@ -47,14 +49,7 @@ int main()
 	GLFWcursor* cursor = glfwCreateCursor(&cursor_img, cur_width/2, cur_height/2);
 	stbi_image_free(cursor_data);
 	glfwSetCursor(window, cursor);
-	glfwSetMouseButtonCallback(window, mousebuttonclick_callback);
-	glfwSetCursorPosCallback(window, mousemove_callback);
 	glfwShowWindow(window);
-	windowData winData;
-	winData.WIDTH = WIDTH;
-	winData.HEIGHT = HEIGHT;
-	winData.mouse_pressed = false;
-	glfwSetWindowUserPointer(window, &winData);
 	Shader global_body_shader(S "global_body_vertex_shader.vs", S "global_body_fragment_shader.fs");
 	Shader indiv_body_shader(S "indiv_body_vertex_shader.vs", S "indiv_body_fragment_shader.fs");
 	Shader trajectory_shader(S "trajectory_vertex_shader.vs", S "trajectory_fragment_shader.fs");
@@ -64,26 +59,25 @@ int main()
 	Body sun(window, A "Bodies/sun.jpg", &indiv_body_shader,Proc_Time::PROG_LAUNCH, { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0.05f, 10);
 	Body earth(window, A "Bodies/earth.png", &indiv_body_shader, Proc_Time::PROG_LAUNCH, { 0.3f, 0.0f }, { 0.0f, 0.67f }, 0.04f, 20);
 
-	ContextManager* context = ContextManager::InitContext(window);
 	
-	Button pace_button(context, A "Interface/pace_button.png", vec2sq<float>(-0.2f, 0.9f), 0.0f, 0.0f, 90, true, NULL, NULL);
+	Button* pace_button = context->createStaticButton(A "Interface/pace_button.png", vec2sq<float>(-0.2f, 0.9f), 0.0f, 0.0f, 90, NULL, NULL);
 	standardCallBacksForBlocks::VerticalDisplay_args vec;
 	std::vector <std::string> filenames = { A "Interface/add_object_button.png", A "Interface/delete_object_button.png", A "Interface/show_all_trajectories.png"};
 	std::vector <int> Masks = { 30, 40, 50 };
 	std::vector <void (*)(Button*, void*)> BlockFunctions = {add_object_func, NULL, show_all_traj_func};
 	add_object_struct add_obj_args(window, &indiv_body_shader, nullptr);
 	std::vector <void*> BlockFunctionsArgs = { (void*)&add_obj_args, NULL, NULL };
-	ButtonBlock block1(context, filenames, Masks, STANDARD_RIGHT_MOUSEBUTTON_CALL, STANDARD_LEFT_MOUSEBUTTON_HIDE, standardCallBacksForBlocks::VerticalDisplay, BlockFunctions, BlockFunctionsArgs, NULL, NULL, (void*)(&vec));
-	add_obj_args.block = &block1;
+	ButtonBlock* block1 = context->createDynamicButtonBlock(filenames, Masks, STANDARD_RIGHT_MOUSEBUTTON_CALL, STANDARD_LEFT_MOUSEBUTTON_HIDE, standardCallBacksForBlocks::VerticalDisplay, BlockFunctions, BlockFunctionsArgs, NULL, NULL, (void*)(&vec));
+	add_obj_args.block = block1;
 	
-	standardCallBacksForSlider::Condition_struct AppeadConds(slider_appear_condition, (void*)(&pace_button));
+	standardCallBacksForSlider::Condition_struct AppeadConds(slider_appear_condition, (void*)(pace_button));
 	standardCallBacksForSlider::Condition_struct HideConds(slider_hide_condition, (void*)window);
-	Slider slider(context, A "Interface/slider_frame_img.png", A "Interface/slider_point_img.png", vec2sq<float>(0.0f, 0.0f), 80, true, slider_callback, standardCallBacksForSlider::SliderAppear, 
+	Slider* slider = context->createDynamicSlider(A "Interface/slider_frame_img.png", A "Interface/slider_point_img.png", vec2sq<float>(0.0f, 0.0f), 80, slider_callback, standardCallBacksForSlider::SliderAppear, 
 		standardCallBacksForSlider::SliderVerticalDisplay, standardCallBacksForSlider::SliderHide, NULL, (void*)(&AppeadConds), NULL, (void*)(&HideConds));
-	slider.button_callback_args = (void*)(&slider.slider_value);
+	slider->button_callback_args = (void*)(&slider->slider_value);
 	standardCallBacksForInputField::Condition_struct InputAppearConds(input_field_appear_condition, (void*)window);
 	standardCallBacksForInputField::Condition_struct InputHideConds(input_field_hide_condition, (void*)window);
-	InputField input(context, A "Interface/input_line.png", 0, vec2sq<float>(0.5f, -0.8f), 0.0f, 0.0f, 100, false, 
+	InputField* input = context->createDynamicInputField(A "Interface/input_line.png", 0, vec2sq<float>(0.5f, -0.8f), 0.0f, 0.0f, 100, 
 		standardCallBacksForInputField::InputFieldAppear, standardCallBacksForInputField::InputFieldHide, standardCallBacksForInputField::InputFieldDisplay, (void*)&InputAppearConds,
 		(void*)&InputHideConds, NULL);
 	unsigned int scrVAO, scrVBO, scrEBO;
@@ -103,7 +97,6 @@ int main()
 	glBindVertexArray(0);
 	float prevTime = glfwGetTime();
 
-	std::cout << pace_button.size.y << std::endl;
 	while (!glfwWindowShouldClose(window))
 	{
 		delta_time = glfwGetTime() - prevTime;
@@ -122,9 +115,9 @@ int main()
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 		glBindVertexArray(0);
 		
-		block1.blockCall();
+		block1->blockCall();
 		
-		slider.sliderCall();
+		slider->sliderCall();
 		
 
 		displayButtons(context, interface_shader, scrVAO);
